@@ -1,0 +1,63 @@
+# ServiceNow credentials (sn-scriptsync) — per-instance settings.json files carry
+# credentials, so ignore all settings.json and re-include the two versioned ones.
+**/_settings.json
+**/settings.json
+!.claude/settings.json
+!.vscode/settings.json
+
+# MCP server config — may contain credentials, keep local
+.mcp.json
+
+# Per-instance transient state (sn-scriptsync)
+**/_last_error.json
+**/_requests.json
+**/_requests.log
+**/agent/requests/
+**/agent/responses/
+**/agent/_*
+
+# VS Code workspace — only the live agent token file is secret; settings.json is
+# versioned deliberately (carries sn-scriptsync.agentInstructions.autoUpdate=false,
+# required state for the slim kernel — the kernel-integrity hook explains why)
+.vscode/sn-agent-port.json
+
+# Claude Code — local-only state
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# Scratch layers — one-off scripts, API dumps, debug payloads. Rationale: scratch
+# files are where PII and instance data sneak into git; keep them out by default.
+**/_tmp/
+**/_tmp_*
+/screenshots/
+debug.log
+audit.log
+*_composition_temp.json
+
+# Demo/data snapshots (may contain record / personal data — NEVER commit these)
+**/_demo_prep_*/
+
+# Instance data must never land in the PRODUCT repo. Tooling graduates in here;
+# customer and vendor instance data stays in the engagement's scriptsync sync
+# folder. These rules are belt-and-braces: probe and run outputs default outside
+# this repo entirely, and the multi-root workspace is arranged so sn-scriptsync
+# cannot elect this folder as its sync root. If any of that ever regresses, this
+# is what stops a customer's config reaching a commit.
+/spikes/
+**/.brain/
+**/RESULTS.md
+**/snbrain-requests.ndjson
+
+# Generated sn-scriptsync IntelliSense stub (large, regenerates locally)
+autocomplete/server.d.ts
+
+# Node
+node_modules/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.obsidian/
+
+# distribution builds
+dist/

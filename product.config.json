@@ -1,0 +1,45 @@
+{
+  "$comment": "Slot registry — the ONLY place customer-specific values live in the framework layer. Fill every REQUIRED slot during onboarding, then run: node tools/render-kernel.js. Hooks read this file at runtime (fail-open when absent).",
+  "customer": {
+    "name": "REQUIRED — customer/organization name, e.g. Acme Logistics",
+    "identityLine": "REQUIRED — one line describing the implementation, e.g. 'the Acme Facilities Management implementation'"
+  },
+  "scopes": {
+    "app": "REQUIRED — primary scoped-app name, e.g. x_acme_facilities",
+    "appSysId": "REQUIRED — sys_id of that sys_scope row (verify on the instance; NEVER pass the name string to create_artifact)",
+    "integration": "OPTIONAL — secondary/integration scope name, or remove this key"
+  },
+  "instances": {
+    "dev": "REQUIRED — dev instance name (writes go here), e.g. acmedev",
+    "test": "OPTIONAL — test instance name",
+    "sandbox": "OPTIONAL — sandbox/scratch instance name"
+  },
+  "language": {
+    "source": "en",
+    "targets": [],
+    "$comment": "targets: e.g. [\"nl\"] for a bilingual project. Empty = single-language; the bilingual hard rule in the kernel renders conditionally."
+  },
+  "naming": {
+    "recordPrefix": "REQUIRED — prefix for created artifact names, e.g. 'ACME - '",
+    "messageKeyNamespace": "REQUIRED — sys_ui_message key namespace, e.g. acme",
+    "storySetFormat": "STRY0xxxxxx.NN - <description>",
+    "$comment": "storySetFormat: adjust to the customer's story-number format; the discipline (one named set per story, numbered sub-sets) is framework law."
+  },
+  "paths": {
+    "wikiRoot": "docs/wiki",
+    "$comment": "Repo-relative root of the knowledge wiki. The kernel routing map and the write-guard hook derive page paths from this."
+  },
+  "git": {
+    "host": "azure-devops",
+    "remote": "REQUIRED — clone URL of the customer repo",
+    "$comment": "host: azure-devops | github | gitlab — selects host-specific guidance in the git skills."
+  },
+  "tooling": {
+    "agentPortFile": ".vscode/sn-agent-port.json",
+    "docPipelineSkill": "write-sn-documentation"
+  },
+  "budgets": {
+    "kernelTokens": 6000,
+    "alwaysOnTokens": 14000
+  }
+}

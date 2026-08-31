@@ -1,0 +1,4 @@
+# No line-ending conversion, ever. The forked engine has deliberately mixed endings
+# (state.js CRLF, stages.js LF — see PROVENANCE.md); autocrlf rewrites would both
+# break edit anchors and destroy byte-for-byte comparability with the fork commit.
+* -text

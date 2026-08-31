@@ -1,0 +1,51 @@
+{
+  "defaultRunner": "copilot",
+  "maxSpawns": 60,
+  "gates": "pause",
+  "models": {
+    "default": "claude-sonnet-4.6",
+    "stages": {
+      "explain": "claude-opus-4.8",
+      "questions": "claude-opus-4.8",
+      "render": "claude-opus-4.8"
+    }
+  },
+  "runners": {
+    "copilot": [
+      "copilot",
+      "-p",
+      "{prompt}",
+      "--allow-all-tools",
+      "--no-ask-user",
+      "--model",
+      "{model}"
+    ],
+    "codex": [
+      "codex",
+      "exec",
+      "--full-auto",
+      "--skip-git-repo-check",
+      "--json",
+      "--config",
+      "model={model}",
+      "{prompt}"
+    ],
+    "claude": [
+      "claude",
+      "-p",
+      "{prompt}",
+      "--dangerously-skip-permissions",
+      "--output-format",
+      "json",
+      "--model",
+      "{model}"
+    ]
+  },
+  "_notes": [
+    "PRECONFIGURED FOR GITHUB COPILOT (Business/Enterprise, usage-based billing). Copilot AI credits = tokens at the listed API rates, 1 credit = USD 0.01, cached tokens included. Sonnet 4.6 reads and claims; Opus 4.8 reasons at explain/questions/render. Measured: one process ~ 8,500-11,000 credits all-Opus, ~ 6,500-7,500 with this split. Turns per worker, not spawn count, is the cost driver.",
+    "Model ids are Copilot's own (claude-sonnet-4.6, claude-opus-4.8, gpt-5.2 ...); an admin policy must allow them. Change models.default / models.stages to taste, or `drive run --model <id>` for one run.",
+    "runners: argv arrays. {prompt} = the one-line worker prompt, {brief} = brief file path, {root} = engagement root, {model} = the stage's model (dropped with its flag when unset).",
+    "Copilot reports no token usage to the CLI; read credits off the usage dashboard. Claude and Codex usage is captured per spawn into .brain/drive.ndjson.",
+    "Third-party CLI flags drift between releases: fix them here, never in drive.js."
+  ]
+}
