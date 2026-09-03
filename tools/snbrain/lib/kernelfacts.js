@@ -14,6 +14,14 @@
  * group legs of 6.6/6.12 need a live run), and the section says so with a pointer instead of
  * being silently absent — an empty org map that names its own gap is a fact; a missing one is
  * an invitation to invent personas.
+ *
+ * THE VOCABULARY SECTION IS A PROJECTION OF lib/vocabulary.js (F6/F10, 2026-09-02). It used
+ * to be built here by matching each recurring token against the TEXT of register-gap
+ * questions, which attached the VendorX definition to "APIM" and "Process" on the first run and
+ * the eVault definition to "Onboarding" on the second. Now: every confirmed term renders with
+ * its definition and DEC number; every recurring token that no human defined renders
+ * unexpanded, by name. The glossary page renders from the same model, so the two cannot
+ * disagree.
  */
 
 'use strict';
@@ -22,17 +30,39 @@ const fs = require('fs');
 const path = require('path');
 
 const { latestById, readJsonl, instanceMentions, INSTANCE_CLAIM_FLOOR } = require('../render.js');
-const { vocabularyCandidates } = require('./stages.js');
+const { buildVocabularyModel } = require('./vocabulary.js');
 
 const VOCABULARY_KERNEL_MAX = 10;
 const ORG_TABLES = Object.freeze(['sys_user_group', 'sys_group_has_role', 'sys_user_grmember', 'sys_user_role_contains']);
+
+function buildVocabularySection(model, wikiRoot) {
+  const lines = [];
+  for (const t of model.terms) {
+    const def = t.definition.length > 160 ? `${t.definition.slice(0, 159)}…` : t.definition;
+    lines.push(`- **${t.canonicalTerm}**${t.aliases.length ? ` (also: ${t.aliases.join(', ')})` : ''} — ${def} _(${t.decisionNum} · decision ${t.hash}${t.needsReconfirmation ? ' · NEEDS RECONFIRMATION' : ''})_`);
+  }
+  const room = Math.max(3, VOCABULARY_KERNEL_MAX - lines.length);
+  for (const v of model.unmatched.slice(0, room)) {
+    lines.push(`- **${v.display}** (${v.loci} records) — unexpanded: no recorded decision defines it. Ask; do not guess${v.looksLikeAcronym ? ' an acronym expansion' : ''}.`);
+  }
+  if (!lines.length) {
+    return 'No token recurs across two or more customer-authored records in this ledger, and no vocabulary was confirmed at the interview — there is no domain register to carry yet.';
+  }
+  const tail = model.terms.length
+    ? `\n\nFull glossary with anchors and context: ${wikiRoot}/glossary.md (generated from the same decisions; this list is its projection).`
+    : `\n\nNo term has a confirmed definition yet; the glossary at ${wikiRoot}/glossary.md lists the same gaps.`;
+  return lines.join('\n') + tail;
+}
 
 function buildKernelFacts(repoRoot) {
   const brainDir = path.join(repoRoot, '.brain');
   const state = JSON.parse(fs.readFileSync(path.join(brainDir, 'state.json'), 'utf8'));
   const claims = latestById(readJsonl(path.join(brainDir, 'claims.jsonl')));
-  const claimsById = new Map(claims.map((c) => [c.id, c]));
-  const decisions = latestById(readJsonl(path.join(brainDir, 'decisions.jsonl')));
+  let wikiRoot = 'docs/wiki';
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'product.config.json'), 'utf8').replace(/^﻿/, ''));
+    if (cfg && cfg.paths && typeof cfg.paths.wikiRoot === 'string') { wikiRoot = cfg.paths.wikiRoot.replace(/\/+$/, ''); }
+  } catch (noConfig) { /* default */ }
 
   // --- the instance landscape, from evidence, with the run's own connection kept distinct ---
   const instances = instanceMentions(claims);
@@ -44,35 +74,9 @@ function buildKernelFacts(repoRoot) {
     (below.length ? `; below the ${INSTANCE_CLAIM_FLOOR}-claim floor: ${below.map((i) => `${i.host} (${i.claims})`).join(', ')}` : '') +
     `; this run's own connection was ${state.instance} — the connection is not the landscape`;
 
-  // --- vocabulary: the recurring customer words, expanded ONLY where a human did ------------
-  const fakeCtx = { brain: { claims: () => claimsById } };
-  const vocab = vocabularyCandidates(fakeCtx).slice(0, VOCABULARY_KERNEL_MAX);
-  /*
-   * AN EXPANSION IS A HUMAN'S ANSWER, NOT A SUBSTRING MATCH. The first cut matched any
-   * decision statement containing the token and produced "SN — the PER update sets are a
-   * separate Peter Bondt project" (the token inside `sn_ohs_im`, boundary class missing the
-   * underscore). Only a decision answering a register-gap question that asked about this very
-   * token counts as its expansion; anything else at best gets a labelled mention-pointer.
-   */
-  const questions = latestById(readJsonl(path.join(brainDir, 'questions.jsonl')));
-  const questionById = new Map(questions.map((q) => [q.id, q]));
-  const wordRe = (token) => new RegExp(`(^|[^a-z0-9_])${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9_]|$)`, 'i');
-  const expansionFor = (token) => {
-    const re = wordRe(token);
-    const dec = decisions.find((d) => {
-      const q = d.answerProvenance && questionById.get(d.answerProvenance.fromQuestion);
-      return q && q.gate === 'register-gap' && re.test(String(q.question || ''));
-    });
-    return dec ? { statement: String(dec.statement), hash: String(dec.id || '').replace(/^DEC-/, '') } : null;
-  };
-  const vocabularySection = vocab.length
-    ? vocab.map((v) => {
-      const exp = expansionFor(v.token);
-      return exp
-        ? `- **${v.display}** (${v.loci} records) — ${exp.statement.length > 160 ? `${exp.statement.slice(0, 159)}…` : exp.statement} _(decision ${exp.hash})_`
-        : `- **${v.display}** (${v.loci} records) — unexpanded: no recorded decision explains it. Ask; do not guess${v.looksLikeAcronym ? ' an acronym expansion' : ''}.`;
-    }).join('\n')
-    : 'No token recurs across two or more customer-authored records in this ledger — there is no domain register to carry yet.';
+  // --- vocabulary: the confirmed terms, then the recurring words nobody defined ------------
+  const model = buildVocabularyModel(repoRoot);
+  const vocabularySection = buildVocabularySection(model, wikiRoot);
 
   // --- the org map, or its honestly declared absence ----------------------------------------
   const orgClaims = claims.filter((c) => c.locus && ORG_TABLES.includes(c.locus.table));
@@ -113,15 +117,18 @@ function buildKernelFacts(repoRoot) {
   return {
     facts: {
       ledger: { instanceLine, instances },
-      vocabulary: { section: vocabularySection, tokens: vocab.length },
+      vocabulary: { section: vocabularySection, tokens: model.candidates.length, terms: model.terms.length },
       orgMap: { section: orgMapSection, groupClaims: orgClaims.length },
     },
     totals: {
       instancesAsserted: asserted.length, instancesBelowFloor: below.length,
-      vocabularyTokens: vocab.length,
-      vocabularyExpanded: vocab.filter((v) => expansionFor(v.token)).length,
+      vocabularyTokens: model.candidates.length,
+      vocabularyTerms: model.terms.length,
+      vocabularyExpanded: model.matched.length,
+      vocabularyUnresolvable: model.unresolvable.length,
       orgClaims: orgClaims.length,
     },
+    model,
   };
 }
 
@@ -141,6 +148,6 @@ function writeKernelFacts(repoRoot) {
 }
 
 module.exports = {
-  buildKernelFacts, writeKernelFacts,
+  buildKernelFacts, writeKernelFacts, buildVocabularySection,
   VOCABULARY_KERNEL_MAX, ORG_TABLES,
 };

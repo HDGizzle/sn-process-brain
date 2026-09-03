@@ -241,6 +241,19 @@ Before ingest, verify mechanically:
 
 - the hooks named in `.claude/settings.json` exist on disk and exit cleanly
 - the request log is present and its last entries pair with the closing capability re-read
+- **generated, never hand-written (2026-09-02):** `render.js --glossary` (the confirmed
+  vocabulary, one model with the kernel section), `--stories` (one page per seeded work
+  item / induced story root, paired to the resolved update sets; the deployment-matrix
+  rows), `--interview` (answered / open / shadow from the questions ledger), `--proof`
+  (the read-only proof, request log resolved from run state and copied to a stable name),
+  `--index` (last among the pages). Each emits a manifest fragment; splice, do not retype.
+- no live page carries a placeholder (`<fill at engagement>`, DELETE-ME, dummy STRY ids,
+  `<open / …>`); only `_TEMPLATE.md` files may — the validator scans the wiki and the kernel
+- the kernel is rendered LAST by `node tools/render-kernel.js` (three mirrors: Claude,
+  Copilot, Codex) and every backticked route in it resolves; the language and platform
+  policy lines come from typed config, never from an HTML comment
+- `node tools/snbrain/snbrain.js skills-audit` passes: every shipped skill carries quoted
+  trigger phrases and is reachable from the kernel
 
 Then the real test, which the validator cannot do for you. **Ask a fresh agent, in the
 engagement repo, with no context from this run**, to state the scope sys_id, the one hard

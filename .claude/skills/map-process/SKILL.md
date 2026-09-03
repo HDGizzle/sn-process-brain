@@ -14,21 +14,41 @@ ask "what does this do?", and the repo answers with spine position, upstream cau
 downstream dependents, and decision provenance — each citing a claim. A repo with pages
 that cannot do that is not done.
 
-## Before the loop — three questions, then the workspace
+## Before the loop — three questions, then the brain, IN THIS FOLDER
 
 Ask the developer, one at a time and nothing else: (1) the instance name as
 sn-scriptsync knows it, (2) the process in a few words, (3) which agent CLI they use.
-Then create the workspace YOURSELF — never ask them to name anything:
+Then bootstrap the brain YOURSELF, here — never ask them to open or name another folder:
 
 ```bash
 node tools/snbrain/bootstrap.js --instance <instance> --process "<words>" --runner <cli>
 ```
 
-It names a sibling folder `<instance>-<process-slug>-brain`, copies the product in,
-initialises the brain there, opens VS Code on it and waits for sn-scriptsync's port file.
-Tell the developer to connect the extension to the instance in that window; if the file
-does not appear, ask for the folder where sn-scriptsync already syncs that instance and
-re-run with `--sync-root`. Every command after this runs in that workspace, not here.
+The cloned product folder IS the engagement root and the workspace. Bootstrap first
+checks the runner is on PATH (exit 3 with the options — install the CLI, use another
+runner, or the VS Code adapter, which is designed and not yet available — before
+anything is written), git-inits the folder if needed, initialises the brain and the wiki
+scaffold here, sets `instances.dev`, and waits for sn-scriptsync's port file in this
+folder. Tell the developer to connect the extension to the instance in this VS Code
+window; if the file does not appear, ask for the folder where sn-scriptsync already syncs
+that instance and re-run with `--sync-root`. Every command runs here.
+
+## After the loop — finalize, in this folder
+
+When `drive` reports `done` and terminal `success`:
+
+```bash
+node tools/snbrain/snbrain.js finalize --by "<developer's name>"
+```
+
+It regenerates the read-only proof, runs the handoff checks (no placeholder in a live
+page, every kernel route resolves, the three kernel mirrors identical, hooks wired and
+present, every skill routable), prunes the mapping machine out of this folder (the
+engine, the stage skills, this skill, the scaffold, the run scratch), writes
+`EXPORT-MANIFEST.json` with a sha256 per file, and restarts git history at
+`project brain <instance> / <process>`. It refuses below terminal success unless
+`--force --reason` is given, and refuses unknown files in the root rather than guessing.
+Anything it refused is printed; nothing is deleted on a refusal.
 
 ## The loop — the CLI decides, you dispatch
 

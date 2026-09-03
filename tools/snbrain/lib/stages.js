@@ -34,6 +34,10 @@ const renderLib = require('../render.js');
 const { TARGET_FIELDS } = renderLib;
 /** PRODUCT-97. Whether the deliverable is actually in a commit is a fact about git, not about JSON. */
 const deliverable = require('./deliverable.js');
+/** F6/F10 (2026-09-02). A definition joins its term by identity, never by co-occurrence; the key is minted here. */
+const { extractTerm, normTerm: normVocabTerm } = require('./vocabulary.js');
+/** F8/F11 (2026-09-02). Placeholders and kernel routes are checked at render with the same code export and finalize use. */
+const handoff = require('./handoff.js');
 const {
   UNVERIFIABLE_REASONS, AGENT_UNVERIFIABLE_REASONS, NOT_SAMPLED, UNRESOLVED_STATUSES,
   claimReadCost, SEVERITIES, RUNGS, OUTCOME_RESULTS, normText,
@@ -2465,6 +2469,25 @@ const STAGES = [
       const doc = ctx.__probeDoc;
       const fired = doc.results.filter((r) => r.killFired);
       const unavailable = doc.results.filter((r) => r.status === 'unavailable');
+      /*
+       * D5(a) (2026-09-02) — A KILL THAT ONLY KILLS A BLIND RUN IS DEFERRED, NOT FATAL, HERE.
+       *
+       * The membership-discrimination probe asks whether update-set membership separates
+       * customer-authored records from base content INSTANCE-WIDE — the census's authorship
+       * rung (A3). A seeded run never takes the census: its surface is the developer's named
+       * sets, and its gate is the anchor's resolution (no seeded set resolves non-empty →
+       * blocked). On the second engagement that probe fired on a seeded run and the route went
+       * `terminal: blocked` before orientation could even collect the sets; on the first run it
+       * did not fire (98% vs 36%). The criterion is identified by WHAT IT MEASURES (its data
+       * carries the A3 verdict), never by number — probe numbering is not stable (PRODUCT-5).
+       *
+       * Routing, not softening: the fired criterion is recorded as a warning here with a stamp;
+       * a run that turns out unseeded (seed available:false) or is --blind re-raises it as
+       * blocking at the seed door, where the route to the census is decided.
+       */
+      const deferrable = (r) => !!(r.data && Object.prototype.hasOwnProperty.call(r.data, 'a3Dead')) || /update-set membership/i.test(String(r.title || ''));
+      const deferred = fired.filter(deferrable);
+      const fatal = fired.filter((r) => !deferrable(r));
       return {
         facts: {
           transport: art.transport,
@@ -2474,6 +2497,8 @@ const STAGES = [
             ranAt: doc.meta.date, callsUsed: doc.meta.callsUsed,
             extensionVersion: doc.meta.extensionVersion, apiVersion: doc.meta.apiVersion,
             killsFired: fired.map((r) => r.id), unavailable: unavailable.map((r) => r.id),
+            killsFatal: fatal.map((r) => r.id),
+            killsDeferred: deferred.map((r) => ({ id: r.id, criterion: r.killCriterion || null })),
           },
         },
         stamps: {
@@ -2498,19 +2523,33 @@ const STAGES = [
            */
           seed: blindSkipsOrientation(ctx) ? 'skipped-blind' : 'pending',
           inputEnvelope: blindSkipsOrientation(ctx) ? 'none' : 'pending',
+          // D5(a): the authorship rung this transport can offer a CENSUS. A seeded run reads it
+          // for its render stamp; an unseeded run reads it as the reason it is blocked.
+          authorshipRung: deferred.length ? 'package-level-only' : 'record-level',
         },
-        findings: (art.findings || []).concat(fired.map((r) => ({
+        findings: (art.findings || []).concat(fatal.map((r) => ({
           check: `wp-a-kill-${r.id}`, severity: 'blocking', rung: 'L1',
           message: `WP-A probe ${r.id} fired its kill criterion: ${r.killCriterion}`,
+        })), deferred.map((r) => ({
+          check: `wp-a-kill-${r.id}-deferred`, severity: 'warning', rung: 'L1',
+          message: `WP-A probe ${r.id} fired its kill criterion: ${r.killCriterion} — DEFERRED, not fatal, because it kills only a blind census: ` +
+            'a seeded run\'s surface is the developer\'s named sets and its gate is the anchor\'s resolution. The stamp authorshipRung=package-level-only ' +
+            'travels into the render; if the seed turns out unavailable (or the run is --blind) the seed door re-raises this as blocking.',
         }))),
         raw: doc.results.map((r) => ({ kind: 'probe', id: r.id, status: r.status, killFired: r.killFired, note: r.note, reason: r.reason })),
         progress: true,
       };
     },
     next: (ctx) => {
-      const kills = (ctx.state.facts.probe && ctx.state.facts.probe.killsFired) || [];
+      const probe = ctx.state.facts.probe || {};
+      // Older state (no killsFatal) treats every fired kill as fatal, exactly as before.
+      const kills = Array.isArray(probe.killsFatal) ? probe.killsFatal : (probe.killsFired || []);
+      const deferred = (probe.killsDeferred || []).map((d) => d.id);
       if (kills.length) {
         return { terminal: 'blocked', note: `WP-A kill criteria fired: ${kills.join(', ')}. A kill criterion written before the run is not advisory. Take the probe RESULTS.md to the operator before any census query is issued.` };
+      }
+      if (deferred.length && blindSkipsOrientation(ctx)) {
+        return { terminal: 'blocked', note: `WP-A kill criteria fired: ${deferred.join(', ')} — deferrable on a seeded run, but this run is --blind and takes the census path, which needs the record-level authorship rung the probe says this instance lacks. A blind census on package-level authorship measures the wrong thing.` };
       }
       /*
        * ORIENTATION IS SKIPPED UNDER --blind, and the CLI's route is the only place that can
@@ -2871,26 +2910,89 @@ const STAGES = [
       }));
 
       /*
+       * F5 (2026-09-02) — ONE HUMAN ANSWER MINTS ONE DECISION, OR ITS ATOMS, NEVER BOTH.
+       *
+       * Measured on the second engagement: the respondent said "flow designer is deliberate,
+       * decision tables too" once; it entered as a `prior-decisions` convention AND as two
+       * lifted recall topics, and the ledger rendered DEC-001 (the sentence) beside DEC-003 and
+       * DEC-004 (its halves) — one answer counted three times, the repetition reading as
+       * corroboration. The two mint paths above never shared a source-answer identity.
+       *
+       * The rule, applied by the CLI over what was minted above:
+       *   - every decision carries `answerProvenance.sourceAnswer`, a digest of the verbatim it
+       *     came from;
+       *   - a recall topic whose verbatim equals a convention's is a DUPLICATE: the convention's
+       *     decision stands (it has a witness claim), the topic's is dropped;
+       *   - a convention whose verbatim CONTAINS one or more topic spans is an UMBRELLA: the
+       *     atoms stand, inherit the convention's witness claim and the umbrella's
+       *     sourceAnswer, and record `splitFrom`; the umbrella's decision is suppressed (its
+       *     claim and statedConventions entry stay — conventions.md and the gates read those);
+       *   - a recall topic whose span contains another topic's span is an umbrella too.
+       * Every split is recorded in facts and in the raw ledger, so the original sentence stays
+       * auditable from any atom.
+       */
+      const lc = (s) => normText(s).toLowerCase();
+      const promptFor = (span) => ((art.recall && art.recall.prompts) || []).find((p) => lc(p.verbatim).includes(lc(span)));
+      const convDecisions = decisions.filter((d) => d.derivedFrom === 'stated');
+      const recallDecisions = decisions.filter((d) => d.derivedFrom === 'recall');
+      for (const d of convDecisions) { d.answerProvenance.sourceAnswer = digest({ answer: lc(d.answerProvenance.verbatim) }); }
+      for (const d of recallDecisions) {
+        const p = promptFor(d.answerProvenance.verbatim);
+        d.answerProvenance.sourceAnswer = digest({ answer: lc(p ? p.verbatim : d.answerProvenance.verbatim) });
+      }
+      const dropped = new Set();
+      const splits = [];
+      for (const cd of convDecisions) {
+        const cv = lc(cd.answerProvenance.verbatim);
+        const inside = recallDecisions.filter((rd) => { const s = lc(rd.answerProvenance.verbatim); return s && cv.includes(s); });
+        const exact = inside.filter((rd) => lc(rd.answerProvenance.verbatim) === cv || lc(rd.statement) === lc(cd.statement));
+        for (const rd of exact) { dropped.add(rd); splits.push({ kind: 'duplicate', kept: cd.statement, dropped: rd.statement, sourceAnswer: cd.answerProvenance.sourceAnswer }); }
+        const atoms = inside.filter((rd) => !exact.includes(rd));
+        if (atoms.length) {
+          dropped.add(cd);
+          for (const rd of atoms) {
+            rd.answerProvenance.sourceAnswer = cd.answerProvenance.sourceAnswer;
+            rd.answerProvenance.splitFrom = cd.answerProvenance.verbatim;
+            rd.witnessClaims = [...new Set(rd.witnessClaims.concat(cd.witnessClaims))];
+            rd.linkage = rd.witnessClaims.length ? 'bound' : rd.linkage;
+          }
+          splits.push({ kind: 'umbrella-convention', umbrella: cd.statement, atoms: atoms.map((r) => r.statement), sourceAnswer: cd.answerProvenance.sourceAnswer });
+        }
+      }
+      for (const a of recallDecisions) {
+        if (dropped.has(a)) { continue; }
+        const av = lc(a.answerProvenance.verbatim);
+        const inner = recallDecisions.filter((b) => b !== a && !dropped.has(b) && av.length > lc(b.answerProvenance.verbatim).length && av.includes(lc(b.answerProvenance.verbatim)));
+        if (inner.length) {
+          dropped.add(a);
+          for (const b of inner) { b.answerProvenance.splitFrom = a.answerProvenance.verbatim; b.answerProvenance.sourceAnswer = a.answerProvenance.sourceAnswer; }
+          splits.push({ kind: 'umbrella-recall', umbrella: a.statement, atoms: inner.map((b) => b.statement), sourceAnswer: a.answerProvenance.sourceAnswer });
+        }
+      }
+      const minted = decisions.filter((d) => !dropped.has(d));
+
+      /*
        * PLAN 7.2 / PRODUCT-75 fix (2): the unbound population is DISCLOSED where it is minted —
        * one aggregate warning, never one per decision. Warning, not blocking: an unbound
        * sealed-recall decision is a real fact worth recording; what was illegal was the silence.
        */
-      const unboundDecisions = decisions.filter((d) => d.linkage === 'unbound');
+      const unboundDecisions = minted.filter((d) => d.linkage === 'unbound');
       const findings = unboundDecisions.length ? [{
         check: 'decision-unbound', severity: 'warning', rung: 'L5',
         locus: { table: 'decisions', sysId: 'orientation' },
-        message: `${unboundDecisions.length} of ${decisions.length} decision(s) minted at orientation rest on no claim ` +
+        message: `${unboundDecisions.length} of ${minted.length} decision(s) minted at orientation rest on no claim ` +
           `(all sealed-recall, disclosed as linkage: 'unbound'). Supersession cannot reach them until a later leg anchors ` +
           `them — the induction pass drafts anchors from claim patterns, and the DEC ledger renders the gap on each entry.`,
       }] : [];
 
       return {
-        claims, decisions, findings,
+        claims, decisions: minted, findings,
         facts: {
           orientation: {
             available: true, respondent: art.respondent, recordedAt: art.recordedAt,
             conventions: statedConventions.length, documents: statedDocuments.length,
             recallTopics: recallTopics.length, owners: (art.owners || []).length,
+            decisionsMinted: minted.length, decisionsCollapsed: dropped.size, decisionSplits: splits,
           },
           // The external transport's whole configuration, established once, by the only party
           // who knows it. 5.49 reads this; it does not re-derive it.
@@ -2906,7 +3008,8 @@ const STAGES = [
         queue: { statedConventions, statedDocuments, recallTopics },
         raw: (art.conventions || []).map((c) => Object.assign({ kind: 'stated-convention' }, c))
           .concat(statedDocuments.map((d) => Object.assign({ kind: 'stated-document' }, d)))
-          .concat(recallTopics.map((t) => Object.assign({ kind: 'recall-topic' }, t))),
+          .concat(recallTopics.map((t) => Object.assign({ kind: 'recall-topic' }, t)))
+          .concat(splits.map((s) => Object.assign({ kind: 'decision-split' }, s))),
         progress: true,
       };
     },
@@ -3049,9 +3152,20 @@ const STAGES = [
     },
     apply: (ctx, art) => {
       if (art.available === false) {
+        /*
+         * D5(a): the run is unseeded, so it takes the census path — and the kill criteria
+         * preflight deferred "in case the run is seeded" are now the census's problem. Re-raised
+         * here as BLOCKING with the original criterion, and the route terminates below.
+         */
+        const deferred = ((ctx.state.facts.probe || {}).killsDeferred || []);
         return {
           facts: { seed: { available: false, reason: art.unavailableReason, recordedAt: art.recordedAt } },
           stamps: { seed: 'unavailable', inputEnvelope: 'none' },
+          findings: deferred.map((d) => ({
+            check: `wp-a-kill-${d.id}`, severity: 'blocking', rung: 'L1',
+            message: `WP-A probe ${d.id} fired its kill criterion at preflight (${d.criterion || 'see the probe results'}); it was deferred while this run could still be seeded. ` +
+              'The seed is unavailable, so the run falls to the census path, which rests on the record-level authorship rung this instance lacks. Blocked: re-aim with a seed, or take the probe results to the operator.',
+          })),
           progress: true,
         };
       }
@@ -3089,7 +3203,14 @@ const STAGES = [
      * The unseeded route takes the census exactly as the department-scope product does —
      * one engine, two entries, and the state records which one ran.
      */
-    next: (ctx) => ((ctx.state.facts.seed && ctx.state.facts.seed.available === false) ? 'census' : 'provenance'),
+    next: (ctx) => {
+      const unseeded = ctx.state.facts.seed && ctx.state.facts.seed.available === false;
+      const deferred = ((ctx.state.facts.probe || {}).killsDeferred || []).map((d) => d.id);
+      if (unseeded && deferred.length) {
+        return { terminal: 'blocked', note: `The seed is unavailable and WP-A kill criteria ${deferred.join(', ')} fired at preflight: the census path this run would fall to needs the record-level authorship rung the probe says this instance lacks. Deferred while a seed was possible; fatal now that it is not.` };
+      }
+      return unseeded ? 'census' : 'provenance';
+    },
   },
 
   // =========================================================================
@@ -3761,7 +3882,7 @@ const STAGES = [
       'AXIS 1 — VERSION CHAINS (P4, if provenance found it): for the artifacts in the seeded sets, read sys_update_version to recover every OTHER set those artifacts ever shipped in. This is what makes one honest set sufficient: the chain fans out to the shipping history. Record each recovered set with via:"version-chain" AND seededOverlap: how many DISTINCT seeded artifacts appear in it. A chain reaches a set through one shared form section as easily as through the whole process; the CLI keeps a recovered set only when overlap/members >= ' + ANCHOR_MIN_OVERLAP_RATIO + ' or its story root (the induced pattern on its name) matches a seeded set, and turns every other set\'s T2-only members into neighbour gaps — so count the overlap honestly, do not pad it, and put the set\'s story id in `story` when you can read one.',
       'AXIS 2 — MEMBERSHIP (P2): for each set (seeded and recovered), resolve sys_update_xml entries back to their target records (the preflight probe that measured this resolution rate tells you whether the name-parse route works on this instance — read its result, do not re-derive it). Each target is a T2 candidate carrying the sets that admitted it.',
       'ONE ROUND, EXACTLY. Iterate axis 1 then axis 2 ONCE and stop — a fixpoint snowballs into the full instance. Record expansion.rounds; the validator holds you to it.',
-      'WEIGHT AND EXCLUDE. Weight each admission 1/|set| — a 9-artifact story set is signal, a 400-item sprint batch is noise. EXCLUDE the Default set and batch sets outright (a set is a batch set when its member count is an order of magnitude above the seeded sets\' median, or the human named it as one at seed); list every exclusion with its member count in sets[] role:"excluded" — a silent exclusion reads as coverage.',
+      'WEIGHT AND EXCLUDE — RECOVERED SETS ONLY. Weight each admission 1/|set| — a 9-artifact story set is signal, a 400-item sprint batch is noise. EXCLUDE the Default set and RECOVERED batch sets outright (a recovered set is a batch when its member count is an order of magnitude above the seeded sets\' median, or the human named it as a batch at seed); list every exclusion with its member count in sets[] role:"excluded" — a silent exclusion reads as coverage. A SEEDED SET IS NEVER SIZE-EXCLUDED: the human pointed at it, so it stays role:"seeded" whatever its size — its 1/|set| weight already says the per-member signal is weak, and the CLI mints a warning for a large one. The validator refuses a seeded pointer\'s set in role "excluded".',
       'THE STORY CHAIN (only when the input envelope carries stories AND provenance induced a naming pattern): epic/story ids -> sets whose names match the pattern -> feed into axis 2. If the pattern was not induced, say so in a finding and move on — the epic degrades to context, which was always its fallback role.',
       'EMIT THE SURFACE with one entry per (table, sysId): tier T1 when the human named the artifact or its set at seed, T2 when co-change admitted it, each with the citable edge (evidence.sets, evidence.weight). Deduplicate — a record admitted twice keeps its strongest evidence.',
       'THE SEED-GAP IS THE QUESTION GENERATOR: T2 members whose set the developer did NOT name, and named pointers that resolved to nothing, go into seedGaps[] — they become the interview\'s sharpest questions ("this shipped with your process and you didn\'t mention it — same process, or a neighbour?").',
@@ -3942,9 +4063,29 @@ const STAGES = [
       if (!art.expansion.viaP2 && art.expansion.rounds !== 0) {
         rej.push('expansion.rounds > 0 with viaP2:false. Co-change expansion IS the P2 read; rounds without it are rounds of something else.');
       }
+      /*
+       * D5(b) (2026-09-02) — A SEEDED SET IS NEVER SIZE-EXCLUDED. The second engagement's worker
+       * read "an order of magnitude above the seeded median" and applied it to a 95-member set
+       * the developer had named; the developer then confirmed the set was required for
+       * completeness. Size is a warning for RECOVERED sets, where it stops the chain expanding
+       * into unrelated work; a human's pointer is scope by definition. Population: every sets[]
+       * entry in role "excluded" that is a seeded pointer — via "pointer", or its sys_id / name
+       * matches a resolved update-set pointer. The human's OWN exclusion (seed exclusions[]) is
+       * the one legal way a named set leaves the surface, and it is named as such.
+       */
+      const resolvedSets = (art.resolution || []).filter((r) => r.kind === 'update-set' && r.resolved);
+      const seededIds = new Set(resolvedSets.map((r) => r.sysId).filter(Boolean));
+      const seededNames = new Set(resolvedSets.map((r) => normText(r.pointer).toLowerCase()));
+      const humanExcluded = new Set((((ctx.state.queue || {}).seedExclusions) || []).map((e) => normText(e.value).toLowerCase()));
       for (const s of art.sets || []) {
         if (s.role === 'excluded' && !s.excludedReason) {
           rej.push(`sets["${s.name}"]: excluded with no excludedReason. A silent exclusion reads as coverage — say batch, Default, or the human's own exclusion, with the member count that shows it.`);
+        }
+        if (s.role === 'excluded' && (s.via === 'pointer' || seededIds.has(s.sysId) || seededNames.has(normText(s.name).toLowerCase()))
+            && !humanExcluded.has(normText(s.name).toLowerCase())) {
+          rej.push(`sets["${s.name}"] (${s.members} members): a SEEDED set in role "excluded"${s.excludedReason ? ` — "${s.excludedReason}"` : ''}. ` +
+            'A set the human named is scope by definition; size is a warning for recovered sets only. Keep it role:"seeded" with its 1/|set| weight — the CLI mints a warning for a large one — ' +
+            'or, if the developer excluded it by name, record that at seed (exclusions[]) so the exclusion carries their attribution, not a size rule.');
         }
         if (s.role === 'recovered' && typeof s.seededOverlap !== 'number') {
           rej.push(`sets["${s.name}"]: recovered with no seededOverlap. A version chain reaches a set through ONE shared artifact as easily as through the whole process, and on run pilot-run-6 that admitted the neighbouring H&S form-design work as if it were the integration. Count how many DISTINCT seeded artifacts appear in this set and report it; the CLI keeps a recovered set only when overlap/members >= ${ANCHOR_MIN_OVERLAP_RATIO} or its story root matches a seeded set.`);
@@ -4002,6 +4143,22 @@ const STAGES = [
           message: art.adequacy.verdict === 'barren'
             ? `The seed is BARREN: ${art.adequacy.why} The named set is probably a partial slice of the process — the interview must ask what else ships it, and the render must stamp low seed confidence.`
             : `The seed EXPLODED: ${art.adequacy.why} The named sets are probably batches — ask the developer for story-level sets; the exclusions list shows what was dropped to keep the surface bounded.`,
+        });
+      }
+      /*
+       * D5(b): a large seeded set is a WARNING, never an exclusion — the human pointed at it. The
+       * measure is the same order-of-magnitude rule the procedure uses for recovered batches,
+       * over the seeded sets' own median, so the warning names what a batch rule would have done.
+       */
+      const seededSized = (art.sets || []).filter((s) => s.role === 'seeded' && s.members > 0).map((s) => s.members).sort((a, b) => a - b);
+      const seededMedian = seededSized.length ? seededSized[Math.floor(seededSized.length / 2)] : 0;
+      const largeSeeded = (art.sets || []).filter((s) => s.role === 'seeded' && seededMedian > 0 && s.members >= 10 * seededMedian && s.members >= 50);
+      if (largeSeeded.length) {
+        findings.push({
+          check: 'anchor-seeded-set-large', severity: 'warning', rung: 'L1',
+          message: `${largeSeeded.length} seeded set(s) are an order of magnitude above the seeded median of ${seededMedian} members: ` +
+            `${largeSeeded.map((s) => `${s.name} (${s.members})`).join('; ')}. They stay in the surface because the developer named them — ` +
+            'each member enters at weight 1/|set|, which is the honest per-member signal for a large set. If a set is a sprint batch rather than this process\'s history, the developer excludes it by name at seed; a size rule never does.',
         });
       }
       const gaps = art.seedGaps || [];
@@ -4110,6 +4267,8 @@ const STAGES = [
         facts: {
           anchor: {
             resolution: art.resolution, expansion: art.expansion, adequacy: art.adequacy,
+            // F7: the story renderer pairs seeded work items to these sets by name; keep them in facts.
+            sets: (art.sets || []).map((s) => ({ sysId: s.sysId, name: s.name, members: s.members, role: s.role, via: s.via || null, story: s.story || null, seededOverlap: typeof s.seededOverlap === 'number' ? s.seededOverlap : null })),
             surfaceCounts: {
               t1: art.surface.filter((m) => m.tier === 'T1').length,
               t2: art.surface.filter((m) => m.tier === 'T2').length,
@@ -5666,6 +5825,15 @@ const STAGES = [
               locus: { type: 'array', min: 1, items: { type: 'object', required: ['sysId'], props: { table: { type: 'string', optional: true }, sysId: { type: 'string' }, claim: { type: 'string', optional: true }, band: { type: 'string', optional: true, enum: ['A', 'B', 'C'] } } } },
               cluster: { type: 'object', optional: true, required: ['key', 'size'], props: { key: { type: 'string' }, size: { type: 'number', min: 1 }, members: { type: 'array', optional: true, items: { type: 'string' } }, dissenters: { type: 'array', optional: true, items: { type: 'string' } } } },
               question: { type: 'string', minLength: 20 },
+              /*
+               * F10 (2026-09-02). THE WORD A REGISTER-GAP QUESTION IS ABOUT, as a field. The
+               * kernel used to recover it by matching tokens against the question's prose, so
+               * every word the sentence mentioned inherited the answer ("APIM" and "Process"
+               * carry the VendorX definition on the first run). The CLI stamps `term` from the
+               * quoted token when the agent omits it, and refuses a register-gap question with
+               * no quotable word.
+               */
+              term: { type: 'string', optional: true, minLength: 1 },
               form: { type: 'string', enum: ['open', 'closed'] },
               branchMap: { type: 'object', optional: true, props: { a: { type: 'string' }, b: { type: 'string' } } },
               consequence: { type: 'object', optional: true, props: { text: { type: 'string', optional: true }, count: { type: 'number', optional: true }, countQuery: { type: 'string', optional: true } } },
@@ -5738,6 +5906,13 @@ const STAGES = [
        */
       const ONE_SOURCE_GATES = ['register-gap', 'process-naming', 'convention-gap'];
       const OPEN_FORM_EXEMPT_GATES = ['register-gap', 'process-naming'];
+      // F10: a vocabulary question names its word, or the CLI cannot key the answer to it.
+      const termless = art.questions.filter((q) => q.gate === 'register-gap' && !(q.term || extractTerm(q.question)));
+      if (termless.length) {
+        rej.push(`${termless.length} register-gap question(s) name no term: put the word in quotes in the question text ('QRT') or set \`term\`. ` +
+          `The interview answer is keyed to that exact word — the kernel and the glossary join on it and on nothing else — so a vocabulary question with no quotable word yields a definition nothing can be attached to. ` +
+          `First offender: "${String(termless[0].question).slice(0, 90)}".`);
+      }
       const oneSource = art.questions.filter((q) => !ONE_SOURCE_GATES.includes(q.gate) && !(q.sources && q.sources.B));
       if (oneSource.length) {
         rej.push(`${oneSource.length} question(s) cite only one source with a gate other than ${ONE_SOURCE_GATES.join(' or ')}. A lone anomaly is not a question: name the two things that disagree, or drop it. (A vocabulary gap legitimately has one source — use gate=register-gap for that.)`);
@@ -5892,9 +6067,12 @@ const STAGES = [
         queued.add(q);
       }
       const finalised = ranked.map((q) => {
-        if (q.signalState !== 'admitted') { return Object.assign({}, q, { status: 'shadow' }); }
+        // F10: the term is a CLI-stamped key. The agent's own `term` stands when it gave one.
+        const term = q.gate === 'register-gap' ? (q.term || extractTerm(q.question) || null) : (q.term || undefined);
+        const keyed = term === undefined ? q : Object.assign({}, q, { term });
+        if (keyed.signalState !== 'admitted') { return Object.assign({}, keyed, { status: 'shadow' }); }
         // Surplus is DEFERRED, never discarded: the queue is a record, the cap is a send limit.
-        return Object.assign({}, q, { status: queued.has(q) ? 'queued' : 'deferred' });
+        return Object.assign({}, keyed, { status: queued.has(q) ? 'queued' : 'deferred' });
       });
       /*
        * PLAN 7.3 — the induction leg runs HERE, CLI-computed, and its result is persisted in
@@ -6019,6 +6197,15 @@ const STAGES = [
                */
               processName: { type: 'string', optional: true, minLength: 2 },
               processDiscarded: { type: 'boolean', optional: true },
+              /*
+               * F6/F10 (2026-09-02). A vocabulary answer names the term it defines and, when
+               * the human said so, the aliases that mean the same thing ("QRT" / "case
+               * bedrijfsongeval"). The decision carries both; the glossary and the kernel join
+               * on them by exact normalised string. Omitted: the CLI keys the decision to the
+               * question's own `term`. Anything else the sentence mentions stays undefined.
+               */
+              canonicalTerm: { type: 'string', optional: true, minLength: 1 },
+              aliases: { type: 'array', optional: true, items: { type: 'string' } },
             },
           },
         },
@@ -6151,6 +6338,11 @@ const STAGES = [
             linkage: (witness.length || explains.length) ? 'bound' : 'unbound',
             confidence: a.rationale ? 'high' : 'medium',
             supersedes: null, supersededBy: null, confirmationStatus: 'current', reconfirmation: [],
+            // F6/F10: the vocabulary key, minted here so no renderer has to guess it from prose.
+            canonicalTerm: q.gate === 'register-gap'
+              ? (a.canonicalTerm ? normText(a.canonicalTerm) : (q.term || extractTerm(q.question) || null))
+              : (a.canonicalTerm ? normText(a.canonicalTerm) : null),
+            aliases: [...new Set((a.aliases || []).map((x) => normText(x)).filter(Boolean))],
           });
         }
         questions.push(Object.assign({}, q, {
@@ -6286,6 +6478,31 @@ const STAGES = [
         'the deliverable. All three blind testers went looking for script source and found it only in ' +
         '.brain/raw/verify.ndjson — the one file that does not ship — and one lost a verdict on it. The generator ' +
         'prints the LONGEST body the brain holds and says whether the claim\'s window or the raw capture won.',
+      /*
+       * 2026-09-02 (F6, F7, F8, F11, F12). The pages the last two runs' workers wrote by hand, or
+       * left as scaffold, are GENERATED now, each emitting its manifest fragment. The order
+       * matters: the story pages before the index (the index links what exists), every page
+       * before the kernel (render-kernel refuses a route to a page that is not there yet).
+       */
+      'Run `node tools/snbrain/render.js --root . --glossary --emit-manifest .brain/in/render-glossary.json` and splice its ' +
+        'entry. The glossary and the kernel\'s vocabulary section render from ONE model of the confirmed register-gap decisions ' +
+        '(canonicalTerm + aliases); the validator refuses a glossary that does not name every confirmed term, and a definition ' +
+        'attaches to its own term only — never to a word that merely co-occurred in the question.',
+      'Run `node tools/snbrain/render.js --root . --stories --emit-manifest .brain/in/render-stories.json` and splice its ' +
+        'entries: one immutable page per seeded story/epic pointer and per story root the anchor induced, paired to the resolved ' +
+        'update sets by the shared work-item id in the set name (or the story root), several sets per story kept; the deployment ' +
+        'matrix rows are spliced from the same pairing. Do NOT hand-write story pages, and do not leave the scaffold\'s examples ' +
+        'in deployment-matrix.md — the validator refuses an undeclared story page and any DELETE-ME / dummy-id row in a live page.',
+      'Run `node tools/snbrain/render.js --root . --interview --emit-manifest .brain/in/render-interview.json` for INTERVIEW.md ' +
+        '(answered / open / deferred / shadow, from the questions ledger) and ' +
+        '`node tools/snbrain/render.js --root . --proof --emit-manifest .brain/in/render-proof.json` for the read-only proof: it ' +
+        'resolves the request log from run state — wherever the run kept it — copies it and the closing capability snapshot to ' +
+        'stable names under the wiki, and writes the page the kernel routes to. Both are REQUIRED handoff evidence.',
+      'Run `node tools/snbrain/render.js --root . --index --emit-manifest .brain/in/render-index.json` LAST among the pages: it ' +
+        'links every process and story page on disk plus the ledgers, registries and generated evidence, and carries the run record.',
+      'The scaffold is instantiated at bootstrap (`render.js --scaffold`); if a scaffold page is missing, run it again — it never ' +
+        'overwrites a rendered page. No live page may carry `<fill at engagement>`, DELETE-ME rows, dummy STRY ids or ' +
+        '`<open / …>` status alternatives; only `_TEMPLATE.md` files may. The validator scans every page under the wiki root and the kernel.',
       'Compute each page status from the claims it renders: verified only if every rendered claim is verified, mixed if some are, draft otherwise. Do not write the banner by hand.',
       'Run `node tools/snbrain/render.js --root . --gates` to mint enforcement from the stated conventions. It measures ' +
         'each candidate check against this run\'s own ledger first — a naming rule the customer\'s own work violates ' +
@@ -6298,8 +6515,16 @@ const STAGES = [
         'the claim ledger — slots filled from ledger facts, never free prose you invent. The last run\'s kernel told ' +
         'every agent the dev instance was the one the run happened to be connected to; the ledger knew better in 65 ' +
         'claims. An org map with no group claims renders as its own declared gap — leave that text alone.',
-      'Write the kernel with the routing map, the hard rules, and the instance identity. Wire the enforcement hooks into .claude/settings.json.',
-      'Write the build-procedure skills the engagement needs. A wiki with no skills is a document set, not a brain.',
+      'Render the kernel LAST, with `node tools/render-kernel.js`: it writes CLAUDE.md, .github/copilot-instructions.md and AGENTS.md ' +
+        'from kernel/CLAUDE.template.md + product.config.json, derives the language and platform policy lines from typed config ' +
+        '(language.targets; policy.platform[] — record a platform decision there when a human stated one), and REFUSES an unresolved slot, ' +
+        'an HTML-comment slot, or a routing-map path that resolves to nothing. Add the engagement\'s artifact-type → skill rows to ' +
+        'the template\'s routing map; name what has no governing skill as UNROUTED.',
+      'The enforcement hooks and the build-skill library ship with the product (.claude/hooks, .claude/settings.json, .claude/skills — ' +
+        'see .claude/og-layer.json). Run `node tools/snbrain/render.js --root . --gates` to merge the minted convention gates into ' +
+        'settings.json, and `node tools/snbrain/snbrain.js skills-audit` before ingest: every skill must carry quoted trigger phrases ' +
+        'and be reachable from the kernel, or it is a BLOCKING finding. Write an engagement-specific skill only where a mapped artifact ' +
+        'class needs a procedure the library does not carry, and declare it in skills[].',
       'The CLI checks that the files you name actually exist on disk and that no verified page renders a draft claim. It will not take your word for either.',
       /*
        * PRODUCT-97. The commit is the CLI's action, not the agent's, and it is stated in the brief
@@ -6565,6 +6790,91 @@ const STAGES = [
       }
       if (missing.length) {
         rej.push(`${missing.length} declared file(s) do not exist on disk: ${missing.slice(0, 5).join(', ')}. This stage's deliverable is a repo, not a description of one.`);
+      }
+
+      /*
+       * F8 / F11 / F6 (2026-09-02) — THREE HANDOFF CHECKS, one aggregate rejection each, run here
+       * with the SAME code export and finalize run afterwards (lib/handoff.js), so "finished"
+       * means one thing in every place it is asked.
+       *
+       * (a) NO PLACEHOLDER IN A LIVE PAGE. The second engagement's export passed `render --check`
+       *     with `<fill at engagement>`, DELETE-ME rows and dummy STRY ids in seven live pages;
+       *     the first run's CONTRACT.md carries the same marker. Population: every .md/.json
+       *     under the wiki root plus the kernel mirrors; `_TEMPLATE.md` files exempt.
+       * (b) EVERY KERNEL ROUTE RESOLVES. Both runs' kernels routed open questions to
+       *     `docs/wiki/../INTERVIEW.md`, a file that does not exist. Population: backticked
+       *     local paths in the rendered kernel, parsed by tools/render-kernel.js.
+       * (c) CONFIRMED VOCABULARY REACHES THE GLOSSARY. Population: every register-gap decision;
+       *     when there is at least one, the glossary page must be declared and must name every
+       *     canonical term — the scaffold's blank table is not a glossary.
+       */
+      {
+        const wikiRel = wikiRootOf(ctx);
+        const files = handoff.listFiles(ctx.brain.root, wikiRel)
+          .concat([art.kernel.path].concat(art.pages.map((p) => p.path)).filter((p) => fs.existsSync(path.resolve(ctx.brain.root, p))));
+        const scan = handoff.scanPlaceholders(ctx.brain.root, [...new Set(files.map(fwd))]);
+        const described = handoff.describePlaceholders(scan);
+        if (described) { rej.push(`pages: ${described}`); }
+
+        const routeProblems = fs.existsSync(path.resolve(ctx.brain.root, art.kernel.path))
+          ? handoff.kernelRouteProblems(ctx.brain.root, fwd(art.kernel.path)) : [];
+        if (routeProblems.length) {
+          rej.push(`the kernel's routing map carries ${routeProblems.length} route(s) that resolve to nothing: ${routeProblems.slice(0, 4).join('; ')}` +
+            `${routeProblems.length > 4 ? `; and ${routeProblems.length - 4} more` : ''}. A route is an executable contract — an agent follows it the moment it has a question. ` +
+            'Fix kernel/CLAUDE.template.md or generate the page it names, then re-run node tools/render-kernel.js.');
+        }
+
+        /*
+         * F7 (2026-09-02) — SEEDED STORIES BECOME PAGES. The second engagement seeded four work
+         * items and five exact sets and exported no story page; the scaffold's STRY examples
+         * were the only story content. Population: every seed pointer of kind story/epic, plus
+         * every story root the anchor induced from a resolved set's name. Each must have a
+         * stories/ page declared, and the index must link the stories tier.
+         */
+        {
+          let built = null;
+          try { built = require('./pages.js').buildStoryPages(ctx.brain.root, { wiki: wikiRel }); } catch (e) { built = null; }
+          if (built && built.pages.length) {
+            const declared = new Set(art.pages.map((p) => fwd(p.path).toLowerCase()));
+            const undeclared = built.pages.filter((p) => !declared.has(fwd(p.path).toLowerCase()));
+            if (undeclared.length) {
+              rej.push(`${undeclared.length} of ${built.pages.length} story page(s) the seed and the anchor determine are not declared in pages[]: ` +
+                `${undeclared.slice(0, 5).map((p) => p.path).join(', ')}${undeclared.length > 5 ? ', …' : ''}. ` +
+                'A seeded work item pairs to its update sets by the shared work-item id (or the induced story root) deterministically — ' +
+                'generate them with node tools/snbrain/render.js --root . --stories --emit-manifest .brain/in/render-stories.json and splice the entries; do not hand-write story pages.');
+            }
+            const indexPage = art.pages.find((p) => /(^|\/)index\.md$/i.test(fwd(p.path)) && !/evidence/.test(fwd(p.path)));
+            if (indexPage) {
+              const text = fs.existsSync(path.resolve(ctx.brain.root, indexPage.path)) ? fs.readFileSync(path.resolve(ctx.brain.root, indexPage.path), 'utf8') : '';
+              const unlinked = built.pages.filter((p) => !text.includes(path.posix.basename(p.path)));
+              if (unlinked.length) {
+                rej.push(`"${indexPage.path}" links ${built.pages.length - unlinked.length} of ${built.pages.length} story page(s); missing: ${unlinked.slice(0, 5).map((p) => path.posix.basename(p.path)).join(', ')}. ` +
+                  'Generate the index — node tools/snbrain/render.js --root . --index — after the story pages exist; a story page the index does not reach is a page an agent will not find.');
+              }
+            }
+          }
+        }
+
+        let model = null;
+        try { model = require('./vocabulary.js').buildVocabularyModel(ctx.brain.root); } catch (e) { model = null; }
+        if (model && model.unresolvable.length) {
+          rej.push(`${model.unresolvable.length} vocabulary decision(s) carry no canonical term (${model.unresolvable.map((u) => u.id).join(', ')}): a definition nothing can be keyed to reaches neither the glossary nor the kernel. Re-answer with canonicalTerm.`);
+        }
+        if (model && model.terms.length) {
+          const page = art.pages.find((p) => /glossary\.md$/i.test(fwd(p.path)));
+          if (!page) {
+            rej.push(`${model.terms.length} vocabulary term(s) were confirmed at the interview (${model.terms.slice(0, 5).map((t) => t.canonicalTerm).join(', ')}) and no glossary.md page is declared in pages[]. ` +
+              'The glossary is the wiki\'s single source for terminology; generate it — node tools/snbrain/render.js --root . --glossary --emit-manifest .brain/in/render-glossary.json — and splice the entry.');
+          } else {
+            const abs = path.resolve(ctx.brain.root, page.path);
+            const text = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : '';
+            const absent = model.terms.filter((t) => !text.includes(t.canonicalTerm));
+            if (absent.length) {
+              rej.push(`"${page.path}" does not name ${absent.length} of the ${model.terms.length} confirmed term(s): ${absent.map((t) => t.canonicalTerm).join(', ')}. ` +
+                'Confirmed vocabulary has one source of truth and every projection renders from it; a glossary missing a confirmed term is the scaffold with a new date. Generate it with --glossary.');
+            }
+          }
+        }
       }
 
       /*
@@ -7026,7 +7336,7 @@ const STAGES = [
             inducedDecisionsMinted: induced.length,
           },
         },
-        findings: (art.findings || []).concat(renderQualityFindings(ctx)),
+        findings: (art.findings || []).concat(renderQualityFindings(ctx), storyPairingFindings(ctx)),
         raw: art.pages.map((p) => Object.assign({ kind: 'page' }, p)),
         progress: true,
       };
@@ -7034,6 +7344,26 @@ const STAGES = [
     next: () => 'done',
   },
 ];
+
+/**
+ * F7 (2026-09-02). A resolved update set that pairs to NO seeded story and carries no induced
+ * story root is an unresolved link: it shipped something, and nothing says what work item asked
+ * for it. A warning, visible in the deliverable and askable at the next interview — never a
+ * silent drop, and never a rejection the render worker cannot satisfy (it cannot invent the
+ * pairing the set name does not carry).
+ */
+function storyPairingFindings(ctx) {
+  let built = null;
+  try { built = require('./pages.js').buildStoryPages(ctx.brain.root, { wiki: wikiRootOf(ctx) }); } catch (e) { return []; }
+  if (!built || !built.unpaired.length) { return []; }
+  return [{
+    check: 'story-set-unpaired', severity: 'warning', rung: 'L1',
+    locus: { table: 'sys_update_set', sysId: 'stories' },
+    message: `${built.unpaired.length} resolved update set(s) pair to no seeded story or induced story root: ` +
+      `${built.unpaired.slice(0, 5).map((s) => `${s.name} (${s.members} members)`).join('; ')}${built.unpaired.length > 5 ? '; …' : ''}. ` +
+      'They are listed on deployment-matrix.md as "pairs to no story". Ask the developer which work item shipped them; a set with no story is history nobody can cite.',
+  }];
+}
 
 /**
  * PRODUCT-79 / PRODUCT-80 as BOUNDED findings rather than per-page rejections.

@@ -1,7 +1,11 @@
-<!-- GENERATED-FILE TEMPLATE — this is the single source for BOTH CLAUDE.md and
-     .github/copilot-instructions.md. Edit THIS file, fill product.config.json, then run
-     `node tools/render-kernel.js`. Never edit the rendered copies: the kernel-integrity
-     hook flags them the moment they drift. Slots: {{dotted.path}} → product.config.json. -->
+<!-- GENERATED-FILE TEMPLATE — this is the single source for ALL THREE agent kernels:
+     CLAUDE.md, .github/copilot-instructions.md and AGENTS.md (Codex). Edit THIS file,
+     fill product.config.json, then run `node tools/render-kernel.js`. Never edit the
+     rendered copies: the kernel-integrity hook flags them the moment they drift.
+     Slots: {{dotted.path}} → product.config.json. The two policy slots
+     ({{policy.languageLine}}, {{policy.platformLine}}) are DERIVED by render-kernel.js
+     from language.* and policy.platform[] — there are no HTML-comment slots left in this
+     template, and the renderer refuses to write one. -->
 
 # {{customer.name}} Project Brain — Kernel
 
@@ -29,12 +33,8 @@
 ## How we work
 1. **Skills first.** Invoke every relevant skill before building; multiple skills are
    expected; when two overlap, prefer the more specific.
-2. <!-- SLOT: platform-choice hard rules. Add the customer's non-negotiable platform
-   decisions here (e.g. "configurable workspace only — classic Agent Workspace
-   (sys_aw_*) is banned"). One line each; mechanics go in the wiki. -->
-3. <!-- SLOT: language policy. For multilingual projects state it here, e.g.:
-   "Bilingual EN+NL: every user-visible text ships with a source and a translation.
-   Mechanics: translation skills + wiki/hard-rules." Delete if single-language. -->
+2. **Platform choices.** {{policy.platformLine}}
+3. **Language policy.** {{policy.languageLine}}
 4. Wiki knowledge pages are English; customer-facing deliverables in the customer's
    language. Story docs at close go through the `{{tooling.docPipelineSkill}}` skill —
    never write story content into the manifest.
@@ -93,6 +93,11 @@ docs (those omit the dual-switch rule and teach wrong scope params). Never edit
 
 ## Routing map — open, don't guess
 
+**Every wiki page carries a computed `status:` frontmatter value (`draft | mixed |
+verified`, plus `doc-sourced` for pages built from documents rather than instance reads).
+A page that is not `verified` must be QUOTED WITH its status** — reading a draft page
+with no draft awareness is how unverified knowledge becomes a confident wrong write.
+
 | Need | Open |
 |---|---|
 | Entry point to everything | `{{paths.wikiRoot}}/index.md` |
@@ -107,9 +112,14 @@ docs (those omit the dual-switch rule and teach wrong scope params). Never edit
 | Current process mechanics | process pages via `{{paths.wikiRoot}}/index.md` |
 | Page rules for writing docs | `{{paths.wikiRoot}}/CONTRACT.md` |
 | Deployment state story×env | `{{paths.wikiRoot}}/deployment-matrix.md` |
-| Open questions for the project owner | `{{paths.wikiRoot}}/../INTERVIEW.md` |
+| Controlled vocabulary — the customer's words, defined by the customer | `{{paths.wikiRoot}}/glossary.md` |
+| Every claim the run banked, by table | `{{paths.wikiRoot}}/evidence/index.md` |
+| Full script source, quotable | `{{paths.wikiRoot}}/evidence/source/index.md` |
+| Proof the run only ever read | `{{paths.wikiRoot}}/evidence/read-only-proof.md` |
+| Open questions for the project owner | `{{paths.wikiRoot}}/INTERVIEW.md` |
 
-Build procedures live in `.claude/skills/` — their descriptions route themselves.
+Build procedures live in `.claude/skills/` — their descriptions route themselves; the
+`skills-audit` that ran at render and at finalize proved every one of them is routable.
 
 ## Session bootstrap
 - Agent API: read `{{tooling.agentPortFile}}` → `GET /api/health` (pid+apiVersion must

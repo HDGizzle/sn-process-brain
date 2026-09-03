@@ -57,7 +57,7 @@ a kill criterion fired, `2` means preflight itself could not run.
 | Exit | Meaning | What you do |
 |---|---|---|
 | `2` | the connection could not be verified | **Stop.** Report the failure verbatim. Do not retry with different arguments hoping it passes. |
-| `1` | a kill criterion fired | Ingest anyway. The CLI decides whether that criterion is fatal for this run, and some are survivable with a stamp. |
+| `1` | a kill criterion fired | Ingest anyway. The CLI decides whether that criterion is fatal for this run, and some are survivable with a stamp. The update-set-membership-discrimination probe (the A3 authorship rung) is **deferred** on a run that can still be seeded: it kills only a blind census, and a seeded run's gate is the anchor's resolution. It is re-raised as blocking at the seed door if the seed turns out unavailable, and is fatal at once under `--blind`. |
 | `0` | all conclusive | Ingest. |
 
 **4. Never soften a probe result.** A probe that returns `unavailable` did not pass. A

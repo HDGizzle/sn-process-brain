@@ -1,0 +1,10 @@
+{
+  "$comment": "Per-table silent-failure reminders injected by sn-artifact-skill-reminder.js at write time. FRAMEWORK entries below are verified platform truth — extend (don't edit) with customer-discovered entries during the engagement; each entry names the owning skill so the agent loads it.",
+  "sys_script_client": "client-scripts skill — onChange REQUIRES the `field` column (NOT field_name/fieldname) or it NEVER fires; ui_type=\"10\" for workspace; every getMessage key must be listed in the `messages` field.",
+  "sys_ui_policy_action": "ui-actions-policies skill — create_artifact/update_record CANNOT set the `ui_policy` reference (silent fail -> orphaned action, no effect). Create the policy AND its actions together via run_background_script.",
+  "sys_ui_policy": "ui-actions-policies skill — ui_type=\"10\"; set on_load / reverse_if_false deliberately; the action link on sys_ui_policy_action can only be set via a background script.",
+  "sys_ui_action": "ui-actions-policies / workspace-modal-actions skill — workspace buttons need form_button_v2=\"true\"; put client logic in client_script_v2 (not script/onclick).",
+  "sys_script": "business-rule-patterns skill — the filter is the gatekeeper; a filter term that dot-walks a BASE-table reference into a child-table-only field silently matches 0 rows -> check such conditions in-script; verify the filter matches >0 intended rows; ES5 only in global scope.",
+  "sys_script_include": "script-include-patterns skill — scoped Ajax MUST extend global.AbstractAjaxProcessor; client GlideAjax MUST use the full api_name (e.g. <your_scope>.MyAjax); match the scope's ES level.",
+  "contract_sla": "sla-management skill — duration_type must reference a valid cmn_relative_duration; verify start/stop conditions + schedule with a query after create."
+}

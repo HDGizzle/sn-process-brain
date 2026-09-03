@@ -42,9 +42,16 @@ mints from dangling references once the queue drains.
 3. **ONE ROUND, EXACTLY.** Axis 1 (version chains) then axis 2 (membership), once. The
    validator holds `expansion.rounds` to 1 when P2 is available; a fixpoint snowballs
    into the full instance.
-4. **WEIGHT AND EXCLUDE, VISIBLY.** Edge weight `1/|set|`. Exclude Default and batch sets
-   (an order of magnitude above the seeded median, or named as batches at seed) and list
-   every exclusion with its member count — a silent exclusion reads as coverage.
+4. **WEIGHT AND EXCLUDE, VISIBLY — RECOVERED SETS ONLY.** Edge weight `1/|set|`. Exclude
+   Default and RECOVERED batch sets (an order of magnitude above the seeded median, or
+   named as batches at seed) and list every exclusion with its member count — a silent
+   exclusion reads as coverage. **A seeded set is never size-excluded.** The human pointed
+   at it, so it stays `role:"seeded"` whatever its size; its `1/|set|` weight already says
+   the per-member signal is weak, and the CLI mints a warning for a large one. The
+   validator refuses a seeded pointer's set in role `excluded` — the second engagement's
+   worker excluded a 95-member named set as a "batch" and the developer then confirmed it
+   was required for completeness. The one legal way a named set leaves the surface is the
+   developer's own `exclusions[]` at seed.
 5. **NO ARTIFACT ENTERS THE SURFACE ON VIBES.** Every T2 member carries `evidence.sets`
    and a numeric `weight`; every T1 member carries the naming route. The validator checks
    per entry.

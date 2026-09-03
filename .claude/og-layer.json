@@ -1,0 +1,548 @@
+{
+  "source": {
+    "repo": "C:/Werk/sn-agent-contextualization-framework",
+    "commit": "605fc712f287679a186fb841da0e76d475c9aebb"
+  },
+  "syncedAt": "2026-09-02T20:55:38.948Z",
+  "scrubbed": {
+    "files": 0,
+    "replacements": 0,
+    "rules": 71
+  },
+  "hooks": [
+    {
+      "path": ".claude/hooks/kernel-integrity.js",
+      "sha256": "2c27e5d1f43e74902c5dfdd37ef9160b3d8862ee690c6cc1ff8dca2681b0f377"
+    },
+    {
+      "path": ".claude/hooks/skill-trigger.js",
+      "sha256": "9e38bbdf42029d790b005f7c3f39f258f5bdc90c52f102d4997305424c8bd510"
+    },
+    {
+      "path": ".claude/hooks/sn-artifact-skill-reminder.js",
+      "sha256": "8068d387f9c5f17362684300b33cca462c347ade4b4efb9d6f959a33da49aa50"
+    },
+    {
+      "path": ".claude/hooks/sn-capture-verifier.js",
+      "sha256": "83aff4003d57391879e8295427afdb03d3d64f87f381830bc6d26c3429008320"
+    },
+    {
+      "path": ".claude/hooks/sn-write-guard.js",
+      "sha256": "a31bfbeb353fc2d4e20a85017dd8bc15fbf3f7c2b12c253c8ea9ba76dc822afc"
+    },
+    {
+      "path": ".claude/hooks/table-gotchas.json",
+      "sha256": "82228ec7b1a2aa8e31dba022ecb2108e3d5e9c6576d5aa4ed4749b7df234d7c3"
+    }
+  ],
+  "settingsHooks": [
+    "node .claude/hooks/kernel-integrity.js",
+    "node .claude/hooks/skill-trigger.js",
+    "node .claude/hooks/sn-artifact-skill-reminder.js",
+    "node .claude/hooks/sn-write-guard.js",
+    "node .claude/hooks/sn-write-guard.js",
+    "node .claude/hooks/sn-capture-verifier.js"
+  ],
+  "skills": [
+    {
+      "name": "acl-security",
+      "files": [
+        {
+          "path": ".claude/skills/acl-security/SKILL.md",
+          "sha256": "d7f8bdce89a60304924bc1c1c8b08663e3027ecdb06688bfe59ec703606dd6ca"
+        }
+      ]
+    },
+    {
+      "name": "approval-workflows",
+      "files": [
+        {
+          "path": ".claude/skills/approval-workflows/SKILL.md",
+          "sha256": "df90f4963e4bd45bcfa32183010ec8580f48140cd218f78eebca5ab88809a8da"
+        }
+      ]
+    },
+    {
+      "name": "assignment-rules",
+      "files": [
+        {
+          "path": ".claude/skills/assignment-rules/SKILL.md",
+          "sha256": "5dc397afb2a4a63968bc79b12477df6d8dbc62b08028bb62e457ce8bb88d64a9"
+        }
+      ]
+    },
+    {
+      "name": "atf-testing",
+      "files": [
+        {
+          "path": ".claude/skills/atf-testing/SKILL.md",
+          "sha256": "e8b4260a785fb1a59357065963bb3e982b1bd1f2b8914c98b34d406fc5977e48"
+        }
+      ]
+    },
+    {
+      "name": "azure-story",
+      "files": [
+        {
+          "path": ".claude/skills/azure-story/SKILL.md",
+          "sha256": "25069f80c548dfac70e646fe3f54f76222a11bf79a0eaad7b15529915906a88c"
+        }
+      ]
+    },
+    {
+      "name": "business-rule-patterns",
+      "files": [
+        {
+          "path": ".claude/skills/business-rule-patterns/references/example_filter_vs_script_br.js",
+          "sha256": "3ba45c89360a6a36d38d31175f526642930f7180c6c9dd71edb0a5e3db021d4b"
+        },
+        {
+          "path": ".claude/skills/business-rule-patterns/SKILL.md",
+          "sha256": "b15bd9230a8b88a6dbb4721479d819dc84cb9e8ce5c0d63c9c0f08f57c646d35"
+        }
+      ]
+    },
+    {
+      "name": "catalog-form-translations",
+      "files": [
+        {
+          "path": ".claude/skills/catalog-form-translations/SKILL.md",
+          "sha256": "e554abadeca161746277c6edc3a77fb630690c0a089235d182f8a71fe8440d18"
+        }
+      ]
+    },
+    {
+      "name": "client-scripts",
+      "files": [
+        {
+          "path": ".claude/skills/client-scripts/SKILL.md",
+          "sha256": "30d18792f9060e7a7fb2573e5529804f427a3893b3128697e17bcfd634bb27eb"
+        }
+      ]
+    },
+    {
+      "name": "custom-related-lists",
+      "files": [
+        {
+          "path": ".claude/skills/custom-related-lists/SKILL.md",
+          "sha256": "115b670232d4c5128d31076abc39fe3ff47dde7de3910bed7c71ea334fbeac4c"
+        }
+      ]
+    },
+    {
+      "name": "data-policies",
+      "files": [
+        {
+          "path": ".claude/skills/data-policies/references/example_create_choices.js",
+          "sha256": "6ae43be9e4dc7297776d8cf75fb411f7918db8fcd06f2c75fe0d5e979c3ff676"
+        },
+        {
+          "path": ".claude/skills/data-policies/references/example_delete_fields.js",
+          "sha256": "d06d7eff38945ebd4104326e0b41c4a40993a055ce145e8fada01e3bd098151c"
+        },
+        {
+          "path": ".claude/skills/data-policies/references/example_upsert_translations.js",
+          "sha256": "9332f40a8a5a1e1187142d86592a63cccfc083a724af75f1ac8a36ea9592160b"
+        },
+        {
+          "path": ".claude/skills/data-policies/SKILL.md",
+          "sha256": "575a065de9465bc80d4537f15e3abb01d375da13e7d5835e877f063b9f1141aa"
+        }
+      ]
+    },
+    {
+      "name": "decision-tables",
+      "files": [
+        {
+          "path": ".claude/skills/decision-tables/SKILL.md",
+          "sha256": "b360ade436ef800dca6de88acd59064360262cd3e5586f69fc40a72c90d7c87f"
+        }
+      ]
+    },
+    {
+      "name": "dynamic-filter-options",
+      "files": [
+        {
+          "path": ".claude/skills/dynamic-filter-options/SKILL.md",
+          "sha256": "9581653fd9e28ca63a2efec233470f03edbb0a1d41dd4cdbe30906cc1393af87"
+        }
+      ]
+    },
+    {
+      "name": "es5-compliance",
+      "files": [
+        {
+          "path": ".claude/skills/es5-compliance/SKILL.md",
+          "sha256": "8f71648a274fe4ac24e5d38490d1c2e5584dcda11d1f92969642bf905afe2986"
+        }
+      ]
+    },
+    {
+      "name": "field-highlighting",
+      "files": [
+        {
+          "path": ".claude/skills/field-highlighting/SKILL.md",
+          "sha256": "289d10eab90b35dea7a00833856c160f0a8447cf87e0807963d3f17f3fdccd6e"
+        }
+      ]
+    },
+    {
+      "name": "flow-designer",
+      "files": [
+        {
+          "path": ".claude/skills/flow-designer/SKILL.md",
+          "sha256": "86218d406dda77ada221f74627fd702307178b1aebef317bcec055d8547a62ec"
+        }
+      ]
+    },
+    {
+      "name": "git-commit-workflow",
+      "files": [
+        {
+          "path": ".claude/skills/git-commit-workflow/SKILL.md",
+          "sha256": "3d09c3b44ee73cb8f39a0bb29f149c9c95dd0830f8c25b8be071486b0aafa5e0"
+        }
+      ]
+    },
+    {
+      "name": "gliderecord-patterns",
+      "files": [
+        {
+          "path": ".claude/skills/gliderecord-patterns/SKILL.md",
+          "sha256": "07c339bb5ad6dabb5f06af68a0aef4323103f1ae1e574c48bbd646ea6d05504c"
+        }
+      ]
+    },
+    {
+      "name": "insert-test-records",
+      "files": [
+        {
+          "path": ".claude/skills/insert-test-records/references/example_insert_child_records.js",
+          "sha256": "37c7d43f1f48ab812878fb884b3447026221d2614e32eb991fcb4c81f435a956"
+        },
+        {
+          "path": ".claude/skills/insert-test-records/references/example_insert_parent_records.js",
+          "sha256": "2afe2015b9281ac7d1448b3941f6909394cb61511f301e309b5263814578cd79"
+        },
+        {
+          "path": ".claude/skills/insert-test-records/references/example_insert_related_records.js",
+          "sha256": "212a1d167363edaa65b6f30e08f623340b03d14c53d0bb68e072a724ebaf8677"
+        },
+        {
+          "path": ".claude/skills/insert-test-records/SKILL.md",
+          "sha256": "1c6d5c55d2e2cdb569bec0fad62a964b0a15ddea9ea5807fb16849fd142d6f58"
+        }
+      ]
+    },
+    {
+      "name": "journal-field-formatting",
+      "files": [
+        {
+          "path": ".claude/skills/journal-field-formatting/SKILL.md",
+          "sha256": "f584b3758c41f40499f39a0ece15cf9267de29ac556ccc994047037bf568168b"
+        }
+      ]
+    },
+    {
+      "name": "notification-design",
+      "files": [
+        {
+          "path": ".claude/skills/notification-design/SKILL.md",
+          "sha256": "2d96bad99a89317342dd75541cf2a6b994d5c3278d68e6aa035cb047f50034ce"
+        }
+      ]
+    },
+    {
+      "name": "platform-analytics-dashboards",
+      "files": [
+        {
+          "path": ".claude/skills/platform-analytics-dashboards/assets/build_par_dashboard.template.js",
+          "sha256": "b61b5140570f67d2d90a61c23dcee505d604d99723793adb11664ad75e3be114"
+        },
+        {
+          "path": ".claude/skills/platform-analytics-dashboards/assets/capture_par_to_updateset.template.js",
+          "sha256": "32020e4f9bada9b0106a2d25a4685f75e7a9ce0bb5fb0d555c2ce3924f9d2c96"
+        },
+        {
+          "path": ".claude/skills/platform-analytics-dashboards/assets/update_par_filters.template.js",
+          "sha256": "8971d1d959c2e8d84cc954d441a51f04975e5fb15e609b168ffd67cd7421623d"
+        },
+        {
+          "path": ".claude/skills/platform-analytics-dashboards/SKILL.md",
+          "sha256": "91a9fe813997fc0f06154b29d249b9537da7770d6232ca7c36896f3d29820364"
+        }
+      ]
+    },
+    {
+      "name": "record-producer-forms",
+      "files": [
+        {
+          "path": ".claude/skills/record-producer-forms/SKILL.md",
+          "sha256": "13878fde56fc74dc7a35beb418aa8818bbd7204b2abafc87062760db108bdf42"
+        }
+      ]
+    },
+    {
+      "name": "related-list-control",
+      "files": [
+        {
+          "path": ".claude/skills/related-list-control/SKILL.md",
+          "sha256": "31c224a3b3ff9d350e5a543fa016f1d4f62d64ebca6e9a7a7c828f6067d79fc1"
+        }
+      ]
+    },
+    {
+      "name": "rest-integration",
+      "files": [
+        {
+          "path": ".claude/skills/rest-integration/SKILL.md",
+          "sha256": "0da816ccd953bf0ab2849d3c64fd773ebd1ebf7eb0609b870d53c323605c32e1"
+        }
+      ]
+    },
+    {
+      "name": "scheduled-jobs",
+      "files": [
+        {
+          "path": ".claude/skills/scheduled-jobs/SKILL.md",
+          "sha256": "7b857942d94082f1d323c40abbef3d705e8ae8af0655243c78ff2e8224549c58"
+        }
+      ]
+    },
+    {
+      "name": "scheduled-notification-jobs",
+      "files": [
+        {
+          "path": ".claude/skills/scheduled-notification-jobs/SKILL.md",
+          "sha256": "6e000d5a30b7483eda5da99afa6934f5c5d88d5afe413768b6d356b05d30ffac"
+        }
+      ]
+    },
+    {
+      "name": "scoped-apps",
+      "files": [
+        {
+          "path": ".claude/skills/scoped-apps/SKILL.md",
+          "sha256": "189de2ad038a8a1f1a1d639c9920bef38ae0864570823473a1f6d497de32aff5"
+        }
+      ]
+    },
+    {
+      "name": "script-include-patterns",
+      "files": [
+        {
+          "path": ".claude/skills/script-include-patterns/SKILL.md",
+          "sha256": "4a8efde8f5decff9b1b4867da486366ecc8cdceb39b48ef99881ef7b1d61817e"
+        }
+      ]
+    },
+    {
+      "name": "sla-management",
+      "files": [
+        {
+          "path": ".claude/skills/sla-management/SKILL.md",
+          "sha256": "c33ad4713e85a67ec6756e89e1b1aa8984a0e2ed4b91d77797c4b3ac6a447031"
+        }
+      ]
+    },
+    {
+      "name": "sp-widget-patterns",
+      "files": [
+        {
+          "path": ".claude/skills/sp-widget-patterns/SKILL.md",
+          "sha256": "18dffbcda7e366d57b10391f3b87e19551568a98b9e27edd248c3e382ac5a107"
+        }
+      ]
+    },
+    {
+      "name": "state-flows",
+      "files": [
+        {
+          "path": ".claude/skills/state-flows/SKILL.md",
+          "sha256": "93aa55e79771d18d1f5bda4799719ec58b8cafd36dc98b4eaecd3fdd9d2a6e19"
+        }
+      ]
+    },
+    {
+      "name": "story-specs",
+      "files": [
+        {
+          "path": ".claude/skills/story-specs/SKILL.md",
+          "sha256": "a66a43a4afbd037a6665c2cb961f6d03f49f8ac328286b2cdc06257fc0a362c8"
+        }
+      ]
+    },
+    {
+      "name": "transform-maps",
+      "files": [
+        {
+          "path": ".claude/skills/transform-maps/SKILL.md",
+          "sha256": "d9d39d76ec675ff1e3e1c83923b8b178ba38c2b4c2593e2826dc238aad9fd6d3"
+        }
+      ]
+    },
+    {
+      "name": "translate-server-scripts",
+      "files": [
+        {
+          "path": ".claude/skills/translate-server-scripts/SKILL.md",
+          "sha256": "0dce14b7971e2269a671b4c896d6421bde8a7f49fb228bba44db2938ff155a87"
+        }
+      ]
+    },
+    {
+      "name": "translate-workspace-ui",
+      "files": [
+        {
+          "path": ".claude/skills/translate-workspace-ui/SKILL.md",
+          "sha256": "baf0649cc8a7aa0eca6202a0ac6327aa190c878140c760955ac6eac0aaaf9fd0"
+        }
+      ]
+    },
+    {
+      "name": "ui-actions-policies",
+      "files": [
+        {
+          "path": ".claude/skills/ui-actions-policies/SKILL.md",
+          "sha256": "83122d0fcf8023c2e9d9f31e4178d550ddf96b4a1418ea4d96c24c46ce53fbf8"
+        }
+      ]
+    },
+    {
+      "name": "ui-builder-canvas-editing",
+      "files": [
+        {
+          "path": ".claude/skills/ui-builder-canvas-editing/SKILL.md",
+          "sha256": "69cd9e0552aff3b485ce004b3a08ac7869422f71f6906a0c8e12c0bec7ef061f"
+        }
+      ]
+    },
+    {
+      "name": "ui-builder-patterns",
+      "files": [
+        {
+          "path": ".claude/skills/ui-builder-patterns/SKILL.md",
+          "sha256": "5a171e3c229bc1100cf94e4a694c59bc9e9bfbe95f0abab56b66bd19b3f90d8c"
+        }
+      ]
+    },
+    {
+      "name": "ui-page-patterns",
+      "files": [
+        {
+          "path": ".claude/skills/ui-page-patterns/SKILL.md",
+          "sha256": "b8f3cdbe8e71a4c3f47ae776268fef9403dddfae4e5d80818b07b4c68e00eeea"
+        }
+      ]
+    },
+    {
+      "name": "update-set-scope-strategy",
+      "files": [
+        {
+          "path": ".claude/skills/update-set-scope-strategy/SKILL.md",
+          "sha256": "c66a5d421c36bc7ccacfc622da776bd846cf1f4f685f6c606293bd036f7f0978"
+        }
+      ]
+    },
+    {
+      "name": "update-set-workflow",
+      "files": [
+        {
+          "path": ".claude/skills/update-set-workflow/SKILL.md",
+          "sha256": "1cec592adc419799dd76f6aa0f4134d392248f21622468aafef080bf604af86f"
+        }
+      ]
+    },
+    {
+      "name": "workspace-activity-stream",
+      "files": [
+        {
+          "path": ".claude/skills/workspace-activity-stream/SKILL.md",
+          "sha256": "6b2dedd45c9565f37394dd57429bf675547e6b9b56d24a997449eb6522ce476b"
+        }
+      ]
+    },
+    {
+      "name": "workspace-client-scripts",
+      "files": [
+        {
+          "path": ".claude/skills/workspace-client-scripts/SKILL.md",
+          "sha256": "41f4b0e6b9f32a6474555b209b5bf4f90a21f7986105dac5078d1c2b0e81d119"
+        }
+      ]
+    },
+    {
+      "name": "workspace-list-visibility",
+      "files": [
+        {
+          "path": ".claude/skills/workspace-list-visibility/references/template_workspace_list.js",
+          "sha256": "d33f57f66e56ae3ebf2762f8522fe3d280da926f190387cff44426c04c1c4750"
+        },
+        {
+          "path": ".claude/skills/workspace-list-visibility/SKILL.md",
+          "sha256": "ab9390269d05e060376888200424a173eab7b85e5b98c44f2d8bfe0aa6256d79"
+        }
+      ]
+    },
+    {
+      "name": "workspace-modal-actions",
+      "files": [
+        {
+          "path": ".claude/skills/workspace-modal-actions/references/declarative-action-chains.md",
+          "sha256": "5bf080d7e4fbccc00550d81875929ce92816f76121f869b99d92445a01c25e7f"
+        },
+        {
+          "path": ".claude/skills/workspace-modal-actions/references/form-action-layouts.md",
+          "sha256": "500a78f37382dc2f37c68ea7687838ac9555f6b37b72bdbe35a2521fde30efd9"
+        },
+        {
+          "path": ".claude/skills/workspace-modal-actions/references/modal-views.md",
+          "sha256": "03e66229b603a119c3ee722095c2da7e33af461c366083d53e7966354183354a"
+        },
+        {
+          "path": ".claude/skills/workspace-modal-actions/references/simple-buttons.md",
+          "sha256": "6fba6b5bbe8744e830af404321ebe83fbc663ad4425fa3d4b95691768b6dc570"
+        },
+        {
+          "path": ".claude/skills/workspace-modal-actions/references/translations.md",
+          "sha256": "180e1019809b1f0bed2410ad63085248526be9b27cfeac8f3fed8c1a581ccfb9"
+        },
+        {
+          "path": ".claude/skills/workspace-modal-actions/SKILL.md",
+          "sha256": "29eba16e0a52f7f56c5dd4ecf7865d152305cef5465f8bf223f8621d640ea8cc"
+        }
+      ]
+    },
+    {
+      "name": "workspace-view-rules",
+      "files": [
+        {
+          "path": ".claude/skills/workspace-view-rules/SKILL.md",
+          "sha256": "27c1eca3f851b4bcc44acedf4b059512507fbdaa464270f61a5876391dde5569"
+        }
+      ]
+    },
+    {
+      "name": "write-sn-documentation",
+      "files": [
+        {
+          "path": ".claude/skills/write-sn-documentation/references/confluence_formatting_rules.md",
+          "sha256": "44de0e8fe007c3749bf6f41ba5be810e0814f5c2d6325ed1b8374f8e12fc29eb"
+        },
+        {
+          "path": ".claude/skills/write-sn-documentation/references/example_story_output.md",
+          "sha256": "139500e1368243c23f2ac014305c2da43e35c4e457ba697e369f82a2e791ce79"
+        },
+        {
+          "path": ".claude/skills/write-sn-documentation/references/technical_categories_reference.md",
+          "sha256": "e5e554dd094b31d9233ca46c1be3179dd084ca9b2eb83fa74508926c3301513a"
+        },
+        {
+          "path": ".claude/skills/write-sn-documentation/SKILL.md",
+          "sha256": "fd168bd9a49c329621a0358a31cfc98911c598a6a19423f9c42953c131b17336"
+        }
+      ]
+    }
+  ],
+  "removed": []
+}

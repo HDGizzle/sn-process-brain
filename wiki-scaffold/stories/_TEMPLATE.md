@@ -1,11 +1,11 @@
 ---
-story: STRY0000000
+story: <story-id>
 title: "<one-line story title>"
-tracker-id: <backlog/tracker work-item id, if any>
+tracker: <tracker kind, org/project, and the work-item id or link, if any>
 status: <In progress / Complete>
 updated-sets:
-  - "STRY0000000.00 — <update_set_sys_id> (scope <app_scope>, <N> records)"
-  - "STRY0000000.01 — <same-named set in another scope, or 'shipped EMPTY'>"
+  - "<set name per naming.storySetFormat: {{storySetFormat}}> — <update_set_sys_id> (scope <app_scope>, <N> records)"
+  - "<second set of the same story, or 'shipped EMPTY'>"
 built: "<date range>"
 affects:
   - "processes/<owning-process-page>.md"
@@ -19,7 +19,15 @@ mentions:
 > Immutable build record (wiki story tier). For CURRENT behavior always consult the
 > process pages / live instance — never this page.
 
-# STRY0000000 — <one-line story title>
+# <story-id> — <one-line story title>
+
+<!-- THIS IS A TEMPLATE. Placeholders in angle brackets are the point here and nowhere
+     else: a live story page carries the project's own story id and set names, in the
+     convention this engagement measured (naming.storySetFormat = {{storySetFormat}}),
+     never a generic example from another project. The render stage generates one page
+     per seeded story / work item from the anchor's resolved update sets
+     (node tools/snbrain/render.js --stories); start from this file only for a story
+     closed AFTER the brain was built. -->
 
 <One-paragraph framing: what area of the implementation this story changed, which test
 findings / requirements it rolled up, and a link to the owning process page(s) for
@@ -34,6 +42,17 @@ after close and never re-verified.>
 
 - **<Headline change>** — <what/why; cite [decisions](../decisions.md) entries taken here>.
 - **<Second change>** — <…>.
+
+## Update sets
+
+<!-- Every set that shipped this story, exact names, with the sys_id and member count the
+     anchor stage resolved. Multiple sets per story are normal (a descriptive suffix such as
+     "UI messages", a same-named set in another scope). A set that pairs to no story is an
+     unresolved link and is reported as a finding, never dropped. -->
+
+| Set | sys_id | Members | Role |
+|---|---|---|---|
+| <set name> | `<sys_id>` | <N> | seeded / recovered |
 
 ## Shipped records
 

@@ -37,7 +37,7 @@ none could stop anything. This stage exists so that never happens silently again
 
 3. **One claim per record.** The assertion says what it does:
 
-   > Sets `is_sensitive=true` on incidents whose category is `mbo` and whose state is 0 or 6,
+   > Sets `is_sensitive=true` on incidents whose category is `qrt` and whose state is 0 or 6,
    > before insert and before update.
 
    not:

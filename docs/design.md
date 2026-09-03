@@ -208,3 +208,120 @@ A developer provides ≥1 real update set (plus whatever docs/epic they have), s
 "map this process", and the run produces a repo where the generated probe suite
 passes the point-at-a-record test — with every degradation that occurred stamped and
 visible in the render.
+
+## Decisions of 2026-09-02 — the response to the second engagement's findings
+
+Thirteen findings from the second run (another company's laptop, 2026-08-31; recorded in
+the OG repo's `FINDINGS`) and the verdict pass against the first run
+(`docs/findings-response-2026-09-02.md`) produced five decisions. They are applied, not
+open.
+
+**D1 — Full development brain from day one.** The exported brain ships the OG's hook set,
+its `settings.json` wiring and the WHOLE OG build-skill library, synced into this tree by
+`tools/sync-og-layer.js` (scrubbed by the distribution gate, recorded in
+`.claude/og-layer.json`). `snbrain skills-audit` — at render, at finalize, on demand —
+proves every skill is routable (quoted trigger phrases the `skill-trigger.js` hook
+harvests) and reachable from the kernel; a failure is a BLOCKING finding. The render
+contract was not weakened to accept an empty layer; the layer was made to exist.
+
+**D2 — In-place brain.** No sibling workspace. The cloned product folder is the engagement
+root and the workspace; `bootstrap.js` initialises here and waits for the port file here.
+`snbrain finalize --by <name>` prunes the machine, regenerates the proof, runs the handoff
+checks, writes the hashed manifest and re-initialises git at
+`project brain <instance> / <process>`; it refuses below terminal success unless forced
+with a reason, and refuses unknown files in the root rather than deleting or shipping them.
+
+**D3 — Offline verification.** Every fix was verified with the selftest (new tests named
+after the findings) and by replaying the deterministic renderers over a scratch copy of the
+first run's real ledgers. No instance call, no model spend.
+
+**D4 — Publish.** The gated distribution is rebuilt and pushed to the public distribution
+repo at the end of every such night.
+
+**D5 — Loop policies.** (a) The update-set-membership-discrimination kill (the census's A3
+authorship rung) is DEFERRED at preflight on a run that can still be seeded — a warning
+finding plus the stamp `authorshipRung = package-level-only` — and re-raised as blocking
+at the seed door only when the seed turns out unavailable, or at once under `--blind`.
+The seeded run's gate is the anchor's resolution: no seeded set resolves non-empty →
+blocked. (b) A seeded set is NEVER size-excluded: the batch rule applies to recovered
+sets only; a large seeded set mints a warning and keeps its 1/|set| weight; the validator
+refuses a seeded pointer's set in role `excluded`; the developer's own `exclusions[]` at
+seed is the one legal exit.
+
+### Render is generated, and the deliverable is checked as a tree
+
+Everything the last two runs' workers wrote by hand or left as scaffold is generated
+from the ledgers by `render.js` — `--scaffold`, `--glossary`, `--stories`, `--interview`,
+`--proof`, `--index` — and the kernel by `render-kernel.js` in three mirrors (Claude,
+Copilot, Codex) with the language and platform policy lines derived from typed config.
+One normalised vocabulary model (`lib/vocabulary.js`: `canonicalTerm`, `aliases[]`, the
+DEC number, the witness claims) feeds both the glossary and the kernel section, and a
+definition joins its term by identity only. Story pages pair seeded work items to update
+sets by the numeric id shared in the set name, or the induced story root; several sets
+per story are normal; a seeded set that pairs to nothing is a warning finding.
+
+`lib/handoff.js` is the one definition of "fit to leave": no placeholder in a live page
+(`_TEMPLATE.md` exempt), every kernel route resolves, the three mirrors identical, the
+read-only proof present with its stable copies, hooks wired and on disk, every skill
+routable. `render.validate` runs it on the operating tree; `export` and `finalize` run it
+on the tree that ships; `EXPORT-MANIFEST.json` lists every file with its sha256 and
+`verify-export` / `finalize --check` fail on any add, delete or modify.
+
+### Next build item — the VS Code-native runner adapter (F1)
+
+**The problem, measured.** `drive.js` models every runner as an executable plus arguments
+and spawns one OS process per stage; fresh context per stage is achieved by process
+isolation. On a company-managed laptop with Copilot Chat authenticated in VS Code and no
+permission to install the standalone Copilot CLI, not one automated stage could run — the
+run got as far as bootstrap and the transport, then the launcher prompted to install the
+CLI and the developer declined.
+
+**What exists now.** The runner CONTRACT in `drive.js`: a stage request
+`{ brief: { text, file, stage, iteration }, root, model, toolPolicy: { readOnly, allowlist },
+prompt }` → a normalised result `{ status: ok | failed | unavailable, exit, output, usage,
+error, seconds }`. The three CLI presets sit behind it unchanged (`runStage`, kind `cli`).
+`detectRunners` names every runner with its availability, including `vscode` as
+"designed, not yet available"; `drive.js doctor`, `bootstrap.js` and `drive.js run` all
+report a missing runner with the three options — install the CLI, use another runner
+that is present, or the adapter — BEFORE any brief is written or any credit is spent.
+
+**The adapter design.** A small VS Code extension, `sn-process-brain-runner`, that:
+
+1. **Registers a runner endpoint** the driver can call without a process boundary: a
+   local HTTP listener on 127.0.0.1 with a per-session token written to
+   `.vscode/snbrain-runner.json` (the same shape as sn-scriptsync's port file, so
+   `drive.js` resolves it the same way). `drive.js` gains runner kind `vscode` whose
+   `runStage` POSTs the request and awaits the result; `drive.config.json` gains
+   `runners.vscode = { kind: "vscode", portFile: ".vscode/snbrain-runner.json" }`.
+2. **Creates one fresh chat request per stage** through the VS Code Language Model API
+   (`vscode.lm.selectChatModels` + `sendRequest`) — a NEW request object per stage, no
+   conversation history carried, the brief text as the entire user turn plus the same
+   one-line worker prompt the CLI runners get. Fresh context is structural again: the
+   adapter never reuses a request and never exposes the editor's open chat.
+3. **Enforces the tool policy in the adapter**, not in the prompt: the request is issued
+   with a tool set the adapter defines — file read, file write restricted to the brief's
+   `produce.path` and `.brain/in/`, a `run` tool restricted to `node tools/snbrain/…`
+   commands, and the instance client ONLY through `tools/snbrain/lib/api.js`. Every
+   `rest_request` the model asks for is checked to be a GET before it is issued; a
+   write-shaped call returns a refusal to the model and is logged. Identical restrictions
+   to what `--allow-all-tools` CLI runs get from `lib/api.js`, but enforced at the tool
+   boundary, so they cannot be talked around.
+4. **Returns the normalised result** with `usage` from the LM API's token counts where the
+   model exposes them, `status` from whether the ingest command was run (the driver's
+   existing reconciliation handles the artifact-written-but-not-ingested case), and the
+   model's final text as `output`.
+5. **Leaves the human gates to the orchestrating chat**: the driver still exits 4 at
+   orientation, seed and interview; the person runs those in their own Copilot Chat with
+   the stage skill, exactly as today.
+
+**Acceptance for the build.** A user with Node.js, VS Code, sn-scriptsync and
+authenticated Copilot Chat runs the complete loop without installing a CLI; every
+automated stage receives only its brief and a newly created request; the read-only
+restriction is enforced identically to the CLI runners and the read-only proof shows
+zero write-shaped calls; `drive.js doctor` reports `vscode` available when the extension
+is running; the CLI runners keep working with no configuration change.
+
+**Why not now.** It needs an extension published to a marketplace (or side-loaded by an
+IT department), which is a distribution channel this product does not have yet, and it
+should be built against a real company-managed machine — the second engagement's — not
+simulated.

@@ -188,7 +188,9 @@ function writeProbeResults(file, opts) {
     killFired: (o.kills || []).includes(id),
     killCriterion: (o.kills || []).includes(id) ? `probe ${id} kill` : null,
     note: `probe ${id}`,
-    data: id === 6 ? { reproduced: true, rows: 5 } : {},
+    // D5(a): the membership-discrimination probe is identified by WHAT IT MEASURES (its data
+    // carries the A3 verdict), so a fixture that fires it has to carry that key.
+    data: id === 6 ? { reproduced: true, rows: 5 } : ((o.a3Dead || []).includes(id) ? { a3Dead: true } : {}),
   }));
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify({
@@ -1523,27 +1525,50 @@ group('E. export policy');
  * `success` because export now REFUSES anything else — the policy tests are about which
  * files travel, and they should not be silently passing for the wrong reason.
  */
+function putFile(root, rel, body) {
+  const p = path.join(root, rel);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, body === undefined ? '{}\n' : body);
+}
+
+/**
+ * The SMALLEST tree that is fit for handoff under the 2026-09-02 rules: three identical kernel
+ * mirrors carrying the `.claude/skills/` route, a wired hook that exists, one routable build
+ * skill, the required wiki pages, the read-only proof at its stable name, and the ledgers.
+ * Every handoff test starts here and breaks ONE thing.
+ */
+function fitTree(root) {
+  const kernel = '# kernel\n\nBuild procedures live in `.claude/skills/` — their descriptions route themselves.\n\n| Need | Open |\n|---|---|\n| Entry point | `docs/wiki/index.md` |\n';
+  putFile(root, 'CLAUDE.md', kernel);
+  putFile(root, '.github/copilot-instructions.md', kernel);
+  putFile(root, 'AGENTS.md', kernel);
+  putFile(root, '.claude/settings.json', JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'node .claude/hooks/guard.js' }] }] } }, null, 2) + '\n');
+  putFile(root, '.claude/hooks/guard.js', "'use strict';\nprocess.exit(0);\n");
+  putFile(root, '.claude/skills/business-rule-patterns/SKILL.md', '---\nname: business-rule-patterns\ndescription: Invoke when the user asks to "create a business rule", "before insert" or "after update".\n---\n\n# a build skill — PAYLOAD\n');
+  putFile(root, 'docs/wiki/index.md', '---\ntitle: "Wiki index"\nstatus: "draft"\nclaims-rendered: 0\n---\n\n# index\n');
+  putFile(root, 'docs/wiki/registry-sys-ids.md', '---\ntitle: "sys_id Registry"\nstatus: "draft"\nclaims-rendered: 0\n---\n\n# the brain\n');
+  putFile(root, 'docs/wiki/evidence/read-only-proof.md', '---\ntitle: "Read-only proof"\nstatus: "probe-backed"\nclaims-rendered: 0\n---\n\n# proof\n');
+  putFile(root, 'docs/wiki/evidence/read-only-proof/snbrain-requests.ndjson', '{"phase":"sent","command":"check_connection","instance":"selftest-instance","params":{}}\n');
+  putFile(root, 'kernel/CLAUDE.template.md', '# template\n');
+  putFile(root, 'tools/render-kernel.js', '// stub — the real one is copied by the installer\n');
+  putFile(root, '.brain/claims.jsonl', '{"id":"C-1"}\n');
+  putFile(root, '.brain/decisions.jsonl', '{"id":"DEC-1"}\n');
+  putFile(root, '.brain/index/claim-decisions.json', '{"index":{}}\n');
+  return root;
+}
+
 function exportFixture(name, terminal) {
   const root = scratchRepo(name);
   const brain = Brain.init({ root, instance: 'selftest-instance', stageOrder: STAGE_ORDER });
   const t = terminal === undefined ? 'success' : terminal;
   if (t) { brain.state.terminal = t; brain.state.terminalBy = 'selftest'; brain.save('terminal'); }
-  const put = (rel, body) => {
-    const p = path.join(root, rel);
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, body || '{}\n');
-  };
-  put('CLAUDE.md', '# kernel\n');
-  put('.claude/settings.json', '{"hooks":{}}\n');
-  put('.claude/skills/business-rule-patterns/SKILL.md', '# a build skill — PAYLOAD\n');
+  fitTree(root);
+  const put = (rel, body) => putFile(root, rel, body);
   put('.claude/skills/snbrain-census/SKILL.md', '# a stage skill — THE MACHINE\n');
+  put('.claude/skills/map-process/SKILL.md', '# the seeded orchestrator — THE MACHINE\n');
   put('.claude/commands/map-instance.md', '# drives the loop\n');
-  put('docs/wiki/registry-sys-ids.md', '# the brain\n');
   put('docs/rework-plan.md', '# design of record\n');
   put('docs/build-log/ISSUES.md', '# the product defect register\n');
-  put('.brain/claims.jsonl', '{"id":"C-1"}\n');
-  put('.brain/decisions.jsonl', '{"id":"DEC-1"}\n');
-  put('.brain/index/claim-decisions.json', '{"index":{}}\n');
   put('.brain/in/harvest.json', '{"stage":"harvest"}\n');
   put('.brain/raw/harvest.ndjson', '{}\n');
   return { root, brain };
@@ -1571,7 +1596,7 @@ test('the loop itself does not ship', () => {
   const { root } = exportFixture('exp-machine');
   const to = path.join(SCRATCH, 'out-machine');
   assertEqual(cli(['export', '--to', to, '--root', root]).code, 0);
-  for (const rel of ['.claude/skills/snbrain-census/SKILL.md', '.claude/commands/map-instance.md',
+  for (const rel of ['.claude/skills/snbrain-census/SKILL.md', '.claude/skills/map-process/SKILL.md', '.claude/commands/map-instance.md',
     'docs/rework-plan.md', 'docs/build-log/ISSUES.md', '.brain/state.json', '.brain/in/harvest.json',
     '.brain/raw/harvest.ndjson']) {
     assert(!fs.existsSync(path.join(to, rel)), `"${rel}" shipped to the customer and must not have`);
@@ -2819,6 +2844,18 @@ group('T. persona kernel (7.6)');
 
 const kernelfacts = require('./lib/kernelfacts.js');
 
+/** Create every page the kernel template routes to, so a fixture kernel passes the F11 route check. */
+function touchRoutes(root, wiki) {
+  const w = wiki || 'docs/wiki';
+  for (const rel of ['index.md', 'agent-api.md', 'hard-rules.md', 'registry-sys-ids.md', 'decisions.md', 'tbd.md', 'conventions.md', 'gotchas.md',
+    'CONTRACT.md', 'deployment-matrix.md', 'glossary.md', 'INTERVIEW.md', 'evidence/index.md', 'evidence/source/index.md', 'evidence/read-only-proof.md']) {
+    const abs = path.join(root, w, rel);
+    if (!fs.existsSync(abs)) { putFile(root, `${w}/${rel}`, `---\ntitle: "${rel}"\nstatus: "draft"\nclaims-rendered: 0\n---\n\n# ${rel}\n`); }
+  }
+  fs.mkdirSync(path.join(root, w, 'stories'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.claude', 'skills'), { recursive: true });
+}
+
 test('7.6: the instance landscape is counted from evidence — bare instance rows count, platform hosts never do', () => {
   const rows = [];
   for (let i = 0; i < 12; i += 1) { rows.push({ id: `C-a${i}`.padEnd(14, '0'), locus: { table: 'x_env', sysId: `e${i}` }, assertion: 'instance = devinst02' }); }
@@ -2910,6 +2947,7 @@ test('7.6: render-kernel refuses a placeholder in a required slot, and renders t
     orgMap: { section: 'REQUIRED - generated from the claim ledger: node tools/snbrain/render.js --root . --kernel-facts' },
   };
   fs.writeFileSync(path.join(root, 'product.config.json'), JSON.stringify(config, null, 2));
+  touchRoutes(root);   // F11: every route the template names must resolve, or render-kernel refuses
   const r1 = require('child_process').spawnSync(process.execPath, [path.join(root, 'tools', 'render-kernel.js')], { encoding: 'utf8' });
   assertEqual(r1.status, 1, 'render-kernel wrote a kernel with a hole in it — a required slot still held its placeholder');
   assertIncludes(r1.stderr, 'ledger.instanceLine', 'the refusal does not name the unfilled slot');
@@ -6810,6 +6848,556 @@ function spawnSyncNode(args) {
   const r = require('child_process').spawnSync(process.execPath, args, { encoding: 'utf8' });
   return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
+
+// ===========================================================================
+// X — the findings response of 2026-09-02. One test per finding, built from the
+//     neutralised fixture of the second engagement's run (ACMEIT / PayVault /
+//     CompliTool, work items 7067366 7166178 6713057 7218301) and from what the
+//     first run (pilot-run-8) actually shipped.
+// ===========================================================================
+
+group('X. findings response 2026-09-02');
+
+const handoffLib = require('./lib/handoff.js');
+const pagesLib = require('./lib/pages.js');
+const vocabLib = require('./lib/vocabulary.js');
+const renderKernelJs = path.join(FRAMEWORK_ROOT, 'tools', 'render-kernel.js');
+
+/** An orientation artifact with the given conventions and recall topics lifted from one verbatim answer. */
+function orientationWith(conventions, topics, verbatim) {
+  return {
+    stage: 'orientation', instance: 'selftest-instance', usage: { apiCalls: 0 },
+    available: true, respondent: 'a.developer', recordedAt: '2026-08-31',
+    boundaryAsStated: stages.INSTANCE_WIDE_BOUNDARY,
+    conventions, documents: [],
+    tracker: { kind: 'azure-devops', org: 'acme', project: 'ACMEIT', storiesLiveIn: 'external' },
+    recall: { recordedAt: '2026-08-31', respondent: 'a.developer', blind: true, contamination: 'none', prompts: [{ prompt: 'What is deliberate here?', verbatim }], topics },
+    acceptance: [
+      { id: 'AC-ORI-1', result: 'pass', evidence: 'apiCalls 0' }, { id: 'AC-ORI-2', result: 'pass', evidence: 'no documents' },
+      { id: 'AC-ORI-3', result: 'pass', evidence: 'external' }, { id: 'AC-ORI-4', result: 'pass', evidence: 'spans verbatim' },
+    ],
+  };
+}
+
+test('F5: one answer through both mint paths yields its two atoms, never the umbrella as well', () => {
+  const { root, syncRoot } = startRun('f5-dedup');
+  ingest(root, 'preflight', preflightArtifact(root, syncRoot));
+  const verbatim = 'flow designer is deliberate, decision tables too';
+  const r = ingest(root, 'orientation', orientationWith(
+    [{ kind: 'prior-decisions', statement: verbatim, testable: false }],
+    [{ term: 'flow designer', statement: 'Flow Designer was chosen deliberately.', span: 'flow designer is deliberate' },
+      { term: 'decision tables', statement: 'Decision tables were chosen deliberately.', span: 'decision tables too' }],
+    verbatim));
+  assertEqual(r.json.accepted, true, `orientation rejected: ${JSON.stringify(r.json.rejected)}`);
+  const decs = stateLib.readJsonl(path.join(root, '.brain', 'decisions.jsonl'));
+  assertEqual(decs.length, 2, `one human sentence minted ${decs.length} decision(s): ${decs.map((d) => d.statement).join(' | ')} — the umbrella and its halves both counted on the second engagement`);
+  assert(decs.every((d) => d.answerProvenance && d.answerProvenance.sourceAnswer), 'a decision carries no sourceAnswer id');
+  assertEqual(new Set(decs.map((d) => d.answerProvenance.sourceAnswer)).size, 1, 'the two atoms do not share the source-answer id of the sentence they came from');
+  assert(decs.every((d) => d.answerProvenance.splitFrom === verbatim), 'an atom does not record the verbatim umbrella it was split from');
+  assert(decs.every((d) => d.linkage === 'bound' && d.witnessClaims.length), 'the atoms did not inherit the convention\'s witness claim');
+  const st = JSON.parse(fs.readFileSync(path.join(root, '.brain', 'state.json'), 'utf8'));
+  assertEqual(st.facts.orientation.decisionsCollapsed, 1, 'the split was not recorded in facts');
+  assertEqual(st.facts.orientation.decisionSplits[0].kind, 'umbrella-convention');
+  // The convention itself still stands as a stated convention and a DOC claim (conventions.md, the gates).
+  assertEqual(st.queue.statedConventions.length, 1, 'suppressing the umbrella DECISION must not drop the stated convention');
+});
+
+test('F5: a convention alone mints one; a recall topic equal to the convention is a duplicate, not a second decision', () => {
+  const { root, syncRoot } = startRun('f5-dup');
+  ingest(root, 'preflight', preflightArtifact(root, syncRoot));
+  const verbatim = 'we never use classic workspace';
+  ingest(root, 'orientation', orientationWith(
+    [{ kind: 'prior-decisions', statement: verbatim, testable: false }],
+    [{ term: 'workspace', statement: 'Classic workspace is never used.', span: verbatim }],
+    verbatim));
+  const decs = stateLib.readJsonl(path.join(root, '.brain', 'decisions.jsonl'));
+  assertEqual(decs.length, 1, `a topic quoting the whole convention minted a second decision: ${decs.map((d) => d.statement).join(' | ')}`);
+  assertEqual(decs[0].derivedFrom, 'stated', 'the convention\'s decision (the one with a witness) should be the survivor');
+});
+
+test('F9: the kernel template has no HTML-comment slot, and the renderer refuses one', () => {
+  const tpl = fs.readFileSync(path.join(FRAMEWORK_ROOT, 'kernel', 'CLAUDE.template.md'), 'utf8');
+  assert(!/<!--\s*SLOT:/.test(tpl), 'kernel/CLAUDE.template.md still carries a <!-- SLOT: --> comment');
+  assert(!/\.\.\/INTERVIEW\.md/.test(tpl), 'F11: the template still routes to docs/wiki/../INTERVIEW.md');
+  const rk = require(renderKernelJs);
+  const d = rk.derivedSlots({ language: { source: 'en', targets: ['nl'] } });
+  assertIncludes(d['policy.languageLine'], 'EN+NL', 'the configured targets did not render into the language policy');
+  assertIncludes(d['policy.platformLine'], 'Not established', 'a missing platform policy is not rendered as an attributed "not established"');
+  assertIncludes(d['policy.platformLine'], 'render-kernel.js', 'the "not established" statement is not attributed');
+  const typed = rk.derivedSlots({ policy: { platform: ['configurable workspace only — classic Agent Workspace (sys_aw_*) is banned'] } });
+  assertIncludes(typed['policy.platformLine'], 'sys_aw_*', 'a typed platform rule did not render');
+  // A template that smuggles a SLOT comment back in is refused at render time.
+  const root = scratchRepo('f9-slot');
+  putFile(root, 'kernel/CLAUDE.template.md', '# k\n\n<!-- SLOT: language policy -->\n');
+  putFile(root, 'product.config.json', '{}');
+  putFile(root, 'tools/render-kernel.js', fs.readFileSync(renderKernelJs, 'utf8'));
+  const r = spawnSyncNode([path.join(root, 'tools', 'render-kernel.js'), '--root', root]);
+  assertEqual(r.status, 1, 'a SLOT comment in the rendered kernel was written');
+  assertIncludes(r.stderr, 'HTML-comment slot', 'the refusal does not name the slot');
+});
+
+test('F11: render-kernel refuses a route to a missing page, writes three identical mirrors otherwise', () => {
+  const root = scratchRepo('f11-routes');
+  putFile(root, 'kernel/CLAUDE.template.md', '# k\n\n| Need | Open |\n|---|---|\n| Questions | `{{paths.wikiRoot}}/INTERVIEW.md` |\n| Stories | `{{paths.wikiRoot}}/stories/<story>.md` |\n');
+  putFile(root, 'product.config.json', JSON.stringify({ paths: { wikiRoot: 'docs/wiki' } }));
+  putFile(root, 'tools/render-kernel.js', fs.readFileSync(renderKernelJs, 'utf8'));
+  const r1 = spawnSyncNode([path.join(root, 'tools', 'render-kernel.js'), '--root', root]);
+  assertEqual(r1.status, 1, 'a kernel routing to a page that does not exist was written');
+  assertIncludes(r1.stderr, 'docs/wiki/INTERVIEW.md', 'the refusal does not name the dangling route');
+  putFile(root, 'docs/wiki/INTERVIEW.md', '# i\n');
+  fs.mkdirSync(path.join(root, 'docs', 'wiki', 'stories'), { recursive: true });
+  const r2 = spawnSyncNode([path.join(root, 'tools', 'render-kernel.js'), '--root', root]);
+  assertEqual(r2.status, 0, `render-kernel still refuses with the routes present:\n${r2.stderr}`);
+  const a = fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8');
+  assertEqual(fs.readFileSync(path.join(root, '.github', 'copilot-instructions.md'), 'utf8'), a, 'the Copilot mirror differs');
+  assertEqual(fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8'), a, 'F13: the Codex mirror AGENTS.md is missing or differs');
+  // The export screen catches a route that dangles in the SHIPPED tree even when render passed.
+  const problems = handoffLib.kernelRouteProblems(root, 'CLAUDE.md');
+  assertEqual(problems.length, 0);
+  fs.unlinkSync(path.join(root, 'docs', 'wiki', 'INTERVIEW.md'));
+  assertEqual(handoffLib.kernelRouteProblems(root, 'CLAUDE.md').length, 1, 'deleting the routed page did not make the route check fail');
+});
+
+test('F8: placeholders are legal in _TEMPLATE.md and refused in a live page, by name and line', () => {
+  const root = scratchRepo('f8-scan');
+  const text = '---\ntitle: x\nlast-verified: <fill at engagement>\n---\n\n| Story / set | dev |\n|---|---|\n| STRY0000001.00 — DELETE-ME example | built |\n\n## Status: <open / interview scheduled <date> / answers being executed>\n';
+  putFile(root, 'docs/wiki/stories/_TEMPLATE.md', text);
+  putFile(root, 'docs/wiki/INTERVIEW.md', text);
+  putFile(root, 'docs/wiki/deployment-matrix.md', text);
+  const scan = handoffLib.scanPlaceholders(root, handoffLib.listFiles(root, 'docs/wiki'));
+  assertEqual(scan.templatesExempt, 1, 'the template was not exempted');
+  assert(scan.hits.every((h) => h.path !== 'docs/wiki/stories/_TEMPLATE.md'), 'a template placeholder was reported');
+  assert(scan.hits.some((h) => h.path === 'docs/wiki/INTERVIEW.md' && h.what === 'unselected status alternatives'), 'the INTERVIEW status placeholder was not caught');
+  assert(scan.hits.some((h) => h.path === 'docs/wiki/deployment-matrix.md' && h.what === 'scaffold example row'), 'the DELETE-ME row was not caught');
+  assert(scan.hits.some((h) => h.what === 'scaffold fill marker' && h.line === 3), 'the fill marker was not caught at its line');
+  const described = handoffLib.describePlaceholders(scan);
+  assertIncludes(described, 'INTERVIEW.md', 'the rejection does not name the file');
+  // The same scan is what render.validate runs: a live-page placeholder is a rejection there.
+  const { ctx, art } = renderCtx('f8-validate', FULL_PERSONAS);
+  putFile(ctx.brain.root, 'docs/wiki/tbd.md', '| TBD-000 | STRY0000001 | DELETE-ME example |\n');
+  const rej = STAGE_BY_ID.get('render').validate(ctx, art);
+  assertEqual(rej.filter((m) => /placeholder\(s\) survive/.test(m)).length, 1, `render.validate did not refuse the live-page placeholder:\n${rej.join('\n')}`);
+});
+
+test('F8: the instantiated scaffold carries no placeholder in a live page, and fills the dates from the run', () => {
+  const root = scratchRepo('f8-scaffold');
+  const brain = Brain.init({ root, instance: 'selftest-instance', stageOrder: STAGE_ORDER });
+  brain.state.stamps.processName = 'ACMEIT - HR Onboarding Checklist'; brain.save('stamp');
+  putFile(root, 'product.config.json', JSON.stringify({ paths: { wikiRoot: 'docs/wiki' }, language: { source: 'en', targets: ['nl'] }, naming: { storySetFormat: 'ACMEIT_IP<NN>_S<N>_<workitem>' } }));
+  fs.rmSync(path.join(root, 'docs', 'wiki'), { recursive: true, force: true });
+  const r = pagesLib.scaffoldWiki(root, { date: '2026-09-02' });
+  assert(r.written.length >= 14, `only ${r.written.length} scaffold page(s) instantiated`);
+  const scan = handoffLib.scanPlaceholders(root, handoffLib.listFiles(root, 'docs/wiki'));
+  assertEqual(scan.hits.length, 0, `the instantiated scaffold still carries placeholders in live pages: ${JSON.stringify(scan.hits.slice(0, 5))}`);
+  const contract = fs.readFileSync(path.join(root, 'docs', 'wiki', 'CONTRACT.md'), 'utf8');
+  assertIncludes(contract, 'last-verified: 2026-09-02', 'the verification date was not filled from run metadata');
+  assertIncludes(contract, 'EN+NL', 'the language policy line was not derived from the config');
+  const tpl = fs.readFileSync(path.join(root, 'docs', 'wiki', 'stories', '_TEMPLATE.md'), 'utf8');
+  assertIncludes(tpl, 'ACMEIT_IP<NN>_S<N>_<workitem>', 'F7: the story template is not parameterised from naming.storySetFormat');
+  assert(!/STRY0000000/.test(tpl), 'F7: the story template still carries the generic STRY example');
+  assertIncludes(fs.readFileSync(path.join(root, 'docs', 'wiki', 'index.md'), 'utf8'), 'ACMEIT - HR Onboarding Checklist', 'the index title is not the process name');
+  // Idempotent: a second run keeps every rendered page.
+  const again = pagesLib.scaffoldWiki(root, { date: '2026-09-03' });
+  assertEqual(again.written.length, 0, 'a re-run overwrote rendered pages');
+  /*
+   * And --force keeps the GENERATED ones. Measured while replaying the fix on pilot-run-8:
+   * `--scaffold --force`, run to clear CONTRACT.md's `<fill at engagement>`, overwrote the
+   * generated glossary with the empty scaffold — reintroducing the very finding the glossary
+   * generator closes. A page carrying the accounting key is the run's output, not scaffold.
+   */
+  putFile(root, 'docs/wiki/glossary.md', '---\ntitle: "Glossary"\nstatus: "verified"\nclaims-rendered: 3\n---\n\n| Term | Meaning |\n|---|---|\n| **PayVault** | the payslip environment |\n');
+  const forced = pagesLib.scaffoldWiki(root, { date: '2026-09-03', force: true });
+  assertIncludes(forced.kept.join(','), 'glossary.md', '--force did not keep the generated glossary');
+  assertIncludes(fs.readFileSync(path.join(root, 'docs', 'wiki', 'glossary.md'), 'utf8'), 'PayVault', '--force overwrote a generated page with the scaffold');
+  assert(forced.written.some((p) => /CONTRACT\.md$/.test(p)), '--force did not re-instantiate the ungenerated governance page');
+});
+
+/** The neutralised MyIT fixture as a brain: seed pointers, anchor sets, claims, vocabulary questions and decisions. */
+function acmeitBrain(name) {
+  const root = scratchRepo(name);
+  const brain = Brain.init({ root, instance: 'acmedev', stageOrder: STAGE_ORDER });
+  const sets = [
+    { sysId: 'a1'.padEnd(32, '1'), name: 'ACMEIT_IP19_S3_7067366', members: 12, role: 'seeded', via: 'pointer' },
+    { sysId: 'a2'.padEnd(32, '2'), name: 'ACMEIT_IP19_S3_7067366 UI messages', members: 4, role: 'seeded', via: 'pointer' },
+    { sysId: 'a3'.padEnd(32, '3'), name: 'ACMEIT_IP19_S3_7166178', members: 9, role: 'seeded', via: 'pointer' },
+    { sysId: 'a4'.padEnd(32, '4'), name: 'ACMEIT_IP18_S5_6713057', members: 95, role: 'seeded', via: 'pointer' },
+    { sysId: 'a5'.padEnd(32, '5'), name: 'ACMEIT_IP19_S3_7218301', members: 7, role: 'seeded', via: 'pointer' },
+  ];
+  brain.state.stamps.processName = 'ACMEIT - HR Onboarding Checklist';
+  brain.state.stamps.seed = 'provided'; brain.state.stamps.inputEnvelope = 'sets+stories'; brain.state.stamps.storyPattern = null;
+  brain.state.queue.seedPointers = [
+    { kind: 'story', value: '7067366 Add extra tasks to the HR onboarding checklist', confidence: 'certain', url: 'https://dev.azure.com/acme/ACMEIT/_workitems/edit/7067366' },
+    { kind: 'story', value: '7166178 HR Onboarding checklist fixes', confidence: 'certain' },
+    { kind: 'story', value: '6713057 Follow-up HR Onboarding Hackweek', confidence: 'certain' },
+    { kind: 'story', value: '7218301 Expand query onboarding checklist', confidence: 'certain' },
+    { kind: 'update-set', value: 'ACMEIT_IP19_S3_7067366', confidence: 'certain' },
+  ];
+  brain.state.facts.anchor = { sets, resolution: [] };
+  brain.state.facts.tracker = { kind: 'azure-devops', org: 'acme', project: 'ACMEIT', storiesLiveIn: 'external' };
+  brain.save('fixture');
+  const claim = (i, name, setIdx) => ({
+    locus: { table: 'sys_script', sysId: `c${i}`.padEnd(32, '0'), key: name }, assertion: 'active = true', band: 'A', status: 'verified',
+    evidence: { capturedResponse: { name } }, provenance: { updateSets: [{ sysId: sets[setIdx].sysId, name: sets[setIdx].name }] },
+  });
+  brain.upsertClaims([
+    claim(1, 'HR Onboarding Tasks — PayVault link', 0), claim(2, 'HR Onboarding Tasks — CompliTool state', 0), claim(3, 'Onboarding checklist UI messages', 1),
+    claim(4, 'Onboarding Tasks fix', 2), claim(5, 'Hackweek onboarding query', 3), claim(6, 'Expand onboarding query', 4), claim(7, 'PayVault Tasks reminder', 3),
+  ], { stage: 'harvest' });
+  const ids = [...brain.claims().values()].map((c) => c.id);
+  brain.upsertQuestions([
+    { id: 'Q-aaaaaaaaaaa1', __cliAllocated: true, signal: 'V', gate: 'register-gap', status: 'answered', locus: [{ sysId: 'c1' }], question: "The word 'ACMEIT' prefixes every set and 40 records — what does it stand for?" },
+    { id: 'Q-aaaaaaaaaaa2', __cliAllocated: true, signal: 'V', gate: 'register-gap', status: 'answered', locus: [{ sysId: 'c1' }], question: "'PayVault' appears on the Onboarding Tasks records and in the reminder — what is it?" },
+    { id: 'Q-aaaaaaaaaaa3', __cliAllocated: true, signal: 'V', gate: 'register-gap', status: 'answered', locus: [{ sysId: 'c2' }], question: "'CompliTool' is written to by the Tasks — what is it, and who owns it?", term: 'CompliTool' },
+  ]);
+  const dec = (q, statement, extra) => Object.assign({}, DEC_BASE, { statement, derivedFrom: 'interview', witnessClaims: [ids[0]], answeredBy: 'b.developer', answeredAt: '2026-08-31',
+    answerProvenance: Object.assign({}, DEC_BASE.answerProvenance, { fromQuestion: q, verbatim: statement }), tier: 'confirmed', linkage: 'bound' }, extra || {});
+  brain.upsertDecisions([
+    dec('Q-aaaaaaaaaaa1', 'ACMEIT means Acme Information Technology: the team responsible for portal front-end/back-end activity and the HRSD scope.', { canonicalTerm: 'ACMEIT' }),
+    dec('Q-aaaaaaaaaaa2', 'PayVault is a personal environment for payslips and other personal information that stays accessible after leaving the company.', { aliases: ['pay vault'] }),
+    dec('Q-aaaaaaaaaaa3', 'CompliTool is the compliance tool where managers or HR record relevant states for new employees.'),
+  ]);
+  putFile(root, 'product.config.json', JSON.stringify({ paths: { wikiRoot: 'docs/wiki' }, naming: { storySetFormat: 'ACMEIT_IP<NN>_S<N>_<workitem>' } }));
+  return { root, brain, sets, ids };
+}
+
+test('F6/F10: the vocabulary model keys every definition to its own term, and nothing else', () => {
+  const { root } = acmeitBrain('f6-model');
+  const model = vocabLib.buildVocabularyModel(root);
+  assertEqual(model.terms.map((t) => t.canonicalTerm).join(','), 'ACMEIT,CompliTool,PayVault', 'the three confirmed terms are not the model');
+  assertEqual(model.unresolvable.length, 0, 'a decision keyed by the question\'s quoted word was reported unkeyable');
+  assertEqual(model.lookup('PayVault').decisionNum, 'DEC-002');
+  assertEqual(model.lookup('pay vault').canonicalTerm, 'PayVault', 'a declared alias does not join');
+  assertEqual(model.lookup('Onboarding'), null, 'F10: "Onboarding" borrowed a definition by co-occurrence');
+  assertEqual(model.lookup('Tasks'), null, 'F10: "Tasks" borrowed a definition by co-occurrence');
+  assert(model.unmatched.some((v) => v.token === 'onboarding'), 'the undefined frequent token is not listed as unexpanded');
+  const facts = kernelfacts.buildKernelFacts(root);
+  const lines = facts.facts.vocabulary.section.split('\n');
+  const payLine = lines.find((l) => /\*\*PayVault\*\*/.test(l)) || '';
+  assertIncludes(payLine, 'payslips', 'the PayVault definition did not reach the kernel');
+  assertIncludes(payLine, 'DEC-002', 'the kernel line does not cite the DEC number');
+  const onboardingLine = lines.find((l) => /\*\*Onboarding\*\*/i.test(l)) || '';
+  assertIncludes(onboardingLine, 'unexpanded', 'F10: the kernel expanded "Onboarding" with someone else\'s definition');
+  assert(!/payslips/.test(onboardingLine) && !/compliance tool/.test(onboardingLine), 'F10: a definition leaked onto the Onboarding line');
+});
+
+test('F6: glossary.md renders from the same model, cites the decisions, and render.validate demands it', () => {
+  const { root } = acmeitBrain('f6-glossary');
+  const built = renderLib.buildGlossaryPage(root, { wiki: 'docs/wiki' });
+  assertEqual(built.rejections.length, 0, built.rejections.join('\n'));
+  for (const term of ['ACMEIT', 'PayVault', 'CompliTool']) { assertIncludes(built.page.body, `**${term}**`, `${term} is not in the glossary`); }
+  assertIncludes(built.page.body, 'DEC-003', 'the glossary does not cite the decision number');
+  assertIncludes(built.page.body, 'b.developer', 'the glossary does not attribute the confirmation');
+  assert(!/\|\s*\|\s*\|/.test(built.page.body), 'the glossary carries a blank table row');
+  assert(!/fill at engagement/.test(built.page.body), 'the glossary carries the scaffold marker');
+  assertIncludes(built.page.body, '*Onboarding*', 'the undefined frequent token is not listed as a gap');
+  assertEqual(built.page.claimIds.length, 1, 'the glossary does not declare the anchor claim it prints');
+  // render.validate: vocabulary exists and no glossary page is declared -> rejected; the empty scaffold -> rejected.
+  const brain = Brain.open(root);
+  const ctx = { brain, state: brain.state, stage: 'render' };
+  putFile(root, 'CLAUDE.md', '# k\n'); putFile(root, '.claude/settings.json', '{}');
+  const art = { pages: [], kernel: { path: 'CLAUDE.md', routingEntries: 1 }, settings: { path: '.claude/settings.json', hooks: ['x'] } };
+  const rej1 = STAGE_BY_ID.get('render').validate(ctx, art);
+  assert(rej1.some((m) => /no glossary\.md page is declared/.test(m)), `confirmed vocabulary with no glossary page was accepted:\n${rej1.join('\n')}`);
+  putFile(root, 'docs/wiki/glossary.md', fs.readFileSync(path.join(FRAMEWORK_ROOT, 'wiki-scaffold', 'glossary.md'), 'utf8').replace(/<fill at engagement>/g, '2026-09-02'));
+  art.pages.push({ path: 'docs/wiki/glossary.md', status: 'draft', rendersClaims: [] });
+  const rej2 = STAGE_BY_ID.get('render').validate(ctx, art);
+  assert(rej2.some((m) => /does not name 3 of the 3 confirmed term/.test(m)), `the empty scaffold glossary was accepted:\n${rej2.join('\n')}`);
+  renderLib.writeGlossaryPage(root, { wiki: 'docs/wiki' });
+  art.pages[0].rendersClaims = built.page.claimIds; art.pages[0].status = built.page.status;
+  const rej3 = STAGE_BY_ID.get('render').validate(ctx, art);
+  assertEqual(rej3.filter((m) => /glossary/.test(m)).length, 0, `the generated glossary was refused:\n${rej3.join('\n')}`);
+});
+
+test('F10: a register-gap question with no quotable word is refused; a quoted one is stamped as `term`', () => {
+  const ctx = questionsCtx('f10-term');
+  const q = { signal: 'QS-V', signalState: 'admitted', gate: 'register-gap', sources: { A: { kind: 'claim', ref: 'x' } }, locus: [{ sysId: 'v1' }], form: 'open',
+    question: 'This word prefixes forty records and looks like an acronym; what does it stand for?', rank: { E: 1, C_guard: 1, C_signal: 1, A: 1, U: 1, M: 1 } };
+  const rej = QUESTIONS.validate(ctx, { questions: [q], suppressed: [], counts: { candidates: 1, afterGates: 1, perGateKills: {} } });
+  assert(rej.some((m) => /name no term/.test(m)), `a termless register-gap question was accepted:\n${rej.join('\n')}`);
+  const q2 = Object.assign({}, q, { question: "'PayVault' appears on twelve records and nothing explains it; what is it?" });
+  const rej2 = QUESTIONS.validate(ctx, { questions: [q2], suppressed: [], counts: { candidates: 1, afterGates: 1, perGateKills: {} } });
+  assertEqual(rej2.filter((m) => /name no term/.test(m)).length, 0);
+  const applied = QUESTIONS.apply(ctx, { questions: [q2], suppressed: [], counts: { candidates: 1, afterGates: 1, perGateKills: {} } });
+  assertEqual(applied.questions[0].term, 'PayVault', 'the CLI did not stamp the term on the question row');
+});
+
+test('F7: seeded work items become story pages paired to their sets by the shared id, with multiple sets per story', () => {
+  const { root } = acmeitBrain('f7-stories');
+  const built = pagesLib.writeStoryPages(root, { wiki: 'docs/wiki' });
+  assertEqual(built.pages.length, 4, `expected four story pages, got ${built.pages.map((p) => p.path).join(', ')}`);
+  const s7067366 = built.stories.find((s) => s.key === '7067366');
+  assertEqual(s7067366.sets.length, 2, 'the story with a descriptive-suffix set did not keep both sets');
+  assertIncludes(s7067366.sets.join('|'), 'UI messages');
+  const s6713057 = built.stories.find((s) => s.key === '6713057');
+  assertEqual(s6713057.sets[0], 'ACMEIT_IP18_S5_6713057', 'D5(b): the 95-member seeded set was not kept on its story');
+  assertEqual(built.unpaired.length, 0, 'a seeded set paired to no story');
+  for (const p of built.pages) {
+    const body = fs.readFileSync(path.join(root, p.path), 'utf8');
+    assert(!/STRY000000|DELETE-ME/.test(body), `${p.path} carries a generic scaffold example`);
+    assertIncludes(body, 'Immutable build record', `${p.path} lacks the story-tier header`);
+    assertEqual(renderLib.claimIdsIn(body).size, p.claimIds.length, `${p.path} does not declare the claim ids it prints`);
+  }
+  const matrix = fs.readFileSync(path.join(root, 'docs', 'wiki', 'deployment-matrix.md'), 'utf8');
+  assertIncludes(matrix, 'ACMEIT_IP19_S3_7218301', 'the deployment matrix does not carry the seeded set');
+  assertIncludes(matrix, 'UNKNOWN', 'environment state was asserted instead of marked unknown');
+  assert(!/DELETE-ME|STRY0000001/.test(matrix), 'the deployment matrix keeps the scaffold example row');
+  const index = pagesLib.buildIndexPage(root, { wiki: 'docs/wiki' });
+  for (const p of built.pages) { assertIncludes(index.page.body, path.posix.basename(p.path), `index.md does not link ${p.path}`); }
+  // A seeded set that pairs to nothing is a warning finding, not a silent drop.
+  const brain = Brain.open(root);
+  brain.state.facts.anchor.sets.push({ sysId: 'a6'.padEnd(32, '6'), name: 'ACMEIT_IP19_S3_hotfix', members: 3, role: 'seeded', via: 'pointer' });
+  brain.save('unpaired');
+  const rebuilt = pagesLib.buildStoryPages(root, { wiki: 'docs/wiki' });
+  assertEqual(rebuilt.unpaired.length, 1, 'the unpaired seeded set was not reported');
+  const ctx = { brain, state: brain.state, stage: 'render' };
+  const art = { pages: rebuilt.pages.map((p) => ({ path: p.path, status: p.status, rendersClaims: p.claimIds })), kernel: { path: 'CLAUDE.md', routingEntries: 1 }, settings: { path: '.claude/settings.json', hooks: ['x'] } };
+  putFile(root, 'CLAUDE.md', '# k\n'); putFile(root, '.claude/settings.json', '{}');
+  const applied = STAGE_BY_ID.get('render').apply(ctx, art);
+  assert(applied.findings.some((f) => f.check === 'story-set-unpaired' && f.severity === 'warning'), 'render.apply minted no unresolved-link finding');
+  // render.validate demands the pages be declared.
+  const rej = STAGE_BY_ID.get('render').validate(ctx, { pages: [], kernel: art.kernel, settings: art.settings });
+  assert(rej.some((m) => /story page\(s\) the seed and the anchor determine are not declared/.test(m)), `undeclared story pages were accepted:\n${rej.join('\n')}`);
+});
+
+test('F12: the read-only proof is resolved from run state at a non-default path and copied to a stable name', () => {
+  const root = scratchRepo('f12-proof');
+  const brain = Brain.init({ root, instance: 'acmedev', stageOrder: STAGE_ORDER });
+  const log = path.join(root, 'spikes', 'scriptsync-read-corrected', 'requests.ndjson');
+  fs.mkdirSync(path.dirname(log), { recursive: true });
+  const rows = [];
+  for (let i = 0; i < 375; i += 1) {
+    rows.push(JSON.stringify({ phase: 'sent', at: `2026-08-31T10:00:${String(i % 60).padStart(2, '0')}Z`, id: `r${i}`, command: 'rest_request', instance: 'acmedev', params: { endpoint: '/api/now/table/sys_script', method: 'GET' } }));
+    rows.push(JSON.stringify({ phase: 'done', at: `2026-08-31T10:00:${String(i % 60).padStart(2, '0')}Z`, id: `r${i}`, command: 'rest_request', ok: true }));
+  }
+  fs.writeFileSync(log, rows.join('\n') + '\n');
+  brain.state.facts.requestLog = { path: log.replace(/\\/g, '/'), lastSeenStage: 'verify', lastCount: 375 };
+  brain.save('log');
+  const built = pagesLib.writeReadOnlyProof(root, { wiki: 'docs/wiki' });
+  assertEqual(built.rejections.length, 0, built.rejections.join('\n'));
+  assertEqual(built.totals.calls, 375, 'the call count is not the log\'s');
+  assertEqual(built.totals.writeShaped, 0);
+  assert(fs.existsSync(path.join(root, 'docs', 'wiki', 'evidence', 'read-only-proof', 'snbrain-requests.ndjson')), 'the log was not copied to its stable name');
+  assertIncludes(fs.readFileSync(path.join(root, 'docs', 'wiki', 'evidence', 'read-only-proof.md'), 'utf8'), '**375**');
+  // Export REQUIRES the proof: without it, refused by name; with it, shipped.
+  const { root: r2 } = exportFixture('f12-export-required');
+  fs.rmSync(path.join(r2, 'docs', 'wiki', 'evidence'), { recursive: true, force: true });
+  const to = path.join(SCRATCH, 'out-f12');
+  const r = cli(['export', '--to', to, '--root', r2]);
+  assert(r.code !== 0, 'an export with no read-only proof succeeded');
+  assertIncludes(r.stderr, 'read-only-proof.md', 'the refusal does not name the missing proof');
+});
+
+test('F13: the export manifest hashes every file and names the three mirrors; verify-export fails on any drift', () => {
+  const { root } = exportFixture('f13-manifest');
+  const to = path.join(SCRATCH, 'out-f13');
+  const r = cli(['export', '--to', to, '--root', root]);
+  assertEqual(r.code, 0, `export failed:\n${r.stdout}${r.stderr}`);
+  const manifest = JSON.parse(fs.readFileSync(path.join(to, 'EXPORT-MANIFEST.json'), 'utf8'));
+  assert(Array.isArray(manifest.files) && manifest.files.length > 5, 'the manifest carries no per-file list');
+  assert(manifest.files.every((f) => /^[0-9a-f]{64}$/.test(f.sha256) && typeof f.bytes === 'number'), 'a file row lacks a sha256 or size');
+  assertEqual(manifest.kernels.join(','), 'CLAUDE.md,.github/copilot-instructions.md,AGENTS.md', 'the three kernel mirrors are not listed');
+  assert(manifest.generator && manifest.generator.name, 'no generator identity');
+  assertEqual(cli(['verify-export', '--dir', to]).code, 0, 'a clean export does not verify against its own manifest');
+  fs.appendFileSync(path.join(to, 'CLAUDE.md'), '\nhand edit\n');
+  const v1 = cli(['verify-export', '--dir', to]);
+  assertEqual(v1.code, 1, 'a modified kernel verified clean');
+  assertIncludes(v1.stdout, 'modified since export (1): CLAUDE.md', 'the drift is not named');
+  fs.writeFileSync(path.join(to, 'EXTRA.md'), 'x');
+  fs.unlinkSync(path.join(to, 'AGENTS.md'));
+  const v2 = cli(['verify-export', '--dir', to]);
+  assertIncludes(v2.stdout, 'added since export (1): EXTRA.md');
+  assertIncludes(v2.stdout, 'deleted since export (1): AGENTS.md');
+});
+
+test('D5(a): the membership-discrimination kill is deferred on a seedable run, fatal under --blind and when the seed is unavailable', () => {
+  const { root, syncRoot } = startRun('d5a-deferred');
+  const r = ingest(root, 'preflight', preflightArtifact(root, syncRoot, { kills: [11], a3Dead: [11] }));
+  assertEqual(r.json.accepted, true, `preflight rejected: ${JSON.stringify(r.json.rejected)}`);
+  assertEqual(r.json.terminal, null, 'the deferrable kill blocked the run before the seed door — the second engagement\'s exact route');
+  assertEqual(r.json.nextStage, 'orientation');
+  const st = JSON.parse(fs.readFileSync(path.join(root, '.brain', 'state.json'), 'utf8'));
+  assertEqual(st.stamps.authorshipRung, 'package-level-only', 'the deferred kill left no stamp');
+  assert(r.json.findings.some((f) => f.check === 'wp-a-kill-11-deferred' && f.severity === 'warning'), 'no warning finding was minted');
+  // Another kill is still fatal at preflight.
+  const { root: r2, syncRoot: s2 } = startRun('d5a-fatal');
+  assertEqual(ingest(r2, 'preflight', preflightArtifact(r2, s2, { kills: [2] })).json.terminal, 'blocked', 'a non-deferrable kill stopped being fatal');
+  // --blind takes the census path: the deferrable kill is fatal there.
+  const { root: r3, syncRoot: s3 } = startRun('d5a-blind', ['--blind']);
+  assertEqual(ingest(r3, 'preflight', preflightArtifact(r3, s3, { kills: [11], a3Dead: [11] })).json.terminal, 'blocked', 'a blind run survived a kill the census cannot');
+  // The seed turns out unavailable: the seed door re-raises it as blocking and the route terminates.
+  ingest(root, 'orientation', orientationArtifact());
+  const seed = { stage: 'seed', instance: 'selftest-instance', usage: { apiCalls: 0 }, available: false, unavailableReason: 'no developer reachable this week; the engagement starts brownfield',
+    providedBy: 'a.developer', recordedAt: '2026-08-31', process: { name: 'n/a', trigger: 'nobody could name it', outcome: 'nobody could name it' }, pointers: [],
+    acceptance: [{ id: 'AC-SEED-1', result: 'pass', evidence: 'apiCalls 0' }, { id: 'AC-SEED-2', result: 'pass', evidence: 'no pointers' }, { id: 'AC-SEED-3', result: 'pass', evidence: 'available:false' }] };
+  const s = ingest(root, 'seed', seed);
+  assertEqual(s.json.accepted, true, `seed rejected: ${JSON.stringify(s.json.rejected)}`);
+  assertEqual(s.json.terminal, 'blocked', 'an unseeded run carried on to the census past a deferred authorship kill');
+  assert(s.json.findings.some((f) => f.check === 'wp-a-kill-11' && f.severity === 'blocking'), 'the deferred kill was not re-raised as blocking');
+});
+
+test('D5(b): a seeded set is never size-excluded — the validator refuses it, apply mints a warning for a large one', () => {
+  const ctx = fakeCtx({ stage: 'anchor', state: { stamps: { seed: 'provided', inputEnvelope: 'sets+stories' }, queue: { seedExclusions: [] } } });
+  const ex = ANCHOR_STAGE.example(ctx);
+  const big = { sysId: 'b1'.padEnd(32, 'b'), name: 'ACMEIT_IP18_S5_6713057', members: 95, role: 'excluded', via: 'pointer', excludedReason: 'batch set: 95 members is an order of magnitude above the seeded median of 9' };
+  const art = deepMerge(ex, {});
+  art.sets = ex.sets.concat([big]);
+  art.resolution = ex.resolution.concat([{ pointer: 'ACMEIT_IP18_S5_6713057', kind: 'update-set', resolved: true, sysId: big.sysId, evidence: 'exact name match; 95 members' }]);
+  const rej = ANCHOR_STAGE.validate(ctx, art);
+  assert(rej.some((m) => /SEEDED set in role "excluded"/.test(m)), `a seeded set excluded by size was accepted:\n${rej.join('\n')}`);
+  // The human's own exclusion at seed is the one legal route.
+  const ctx2 = fakeCtx({ stage: 'anchor', state: { stamps: { seed: 'provided' }, queue: { seedExclusions: [{ value: 'ACMEIT_IP18_S5_6713057', why: 'a hackweek batch, not this process' }] } } });
+  assertEqual(ANCHOR_STAGE.validate(ctx2, art).filter((m) => /SEEDED set in role/.test(m)).length, 0, 'the developer\'s own exclusion was refused');
+  // Kept as seeded, a large set is a warning with its weight intact (the example's seeded
+  // median is 34, so the order-of-magnitude line is 340 members here).
+  const kept = deepMerge(ex, {});
+  kept.sets = ex.sets.concat([Object.assign({}, big, { role: 'seeded', members: 400, excludedReason: undefined })]);
+  assertEqual(ANCHOR_STAGE.validate(ctx, kept).length, 0, `a large seeded set kept as seeded was rejected:\n${ANCHOR_STAGE.validate(ctx, kept).join('\n')}`);
+  const applied = ANCHOR_STAGE.apply(ctx, kept);
+  const warn = applied.findings.find((f) => f.check === 'anchor-seeded-set-large');
+  assert(warn && warn.severity === 'warning', 'no warning was minted for the large seeded set');
+  assertIncludes(warn.message, 'ACMEIT_IP18_S5_6713057');
+  assert(applied.facts.anchor.sets.some((s) => s.name === 'ACMEIT_IP18_S5_6713057' && s.role === 'seeded'), 'the set did not reach facts as seeded');
+  assert(applied.queue.processCandidates[0].updateSets.includes('ACMEIT_IP18_S5_6713057'), 'the large seeded set left the process candidate');
+});
+
+test('D1: skills-audit passes a routable, reachable library and blocks an untriggerable skill', () => {
+  const root = scratchRepo('d1-audit');
+  fitTree(root);
+  assertEqual(cli(['skills-audit', '--root', root]).code, 0, 'a routable, reachable skill failed the audit');
+  putFile(root, '.claude/skills/widgets/SKILL.md', '---\nname: widgets\ndescription: Build widgets.\n---\n# widgets\n');
+  const r = cli(['skills-audit', '--root', root]);
+  assertEqual(r.code, 1, 'a skill with no quoted trigger phrase passed the audit');
+  assertIncludes(r.stdout, 'widgets', 'the failing skill is not named');
+  assertIncludes(r.stdout, 'quoted trigger phrase', 'the reason is not stated');
+  // Inside a brain the failure is recorded as a BLOCKING finding.
+  Brain.init({ root, instance: 'x', stageOrder: STAGE_ORDER });
+  cli(['skills-audit', '--root', root]);
+  const findings = stateLib.readJsonl(path.join(root, '.brain', 'findings.jsonl'));
+  assert(findings.some((f) => f.check === 'skills-audit' && f.severity === 'blocking'), 'the audit failure was not recorded as a blocking finding');
+  // The synced OG layer in THIS repo passes: every build skill routes. No CLAUDE.md exists in
+  // the product tree — the engagement renders it — so the audit falls back to the template,
+  // which carries the same `.claude/skills/` route.
+  const og = handoffLib.auditSkills(FRAMEWORK_ROOT);
+  assertEqual(og.kernelPath, 'kernel/CLAUDE.template.md', 'the audit did not fall back to the kernel template in the product tree');
+  assert(og.buildSkills >= 40, `the product tree carries ${og.buildSkills} build skill(s); the OG library is ~47`);
+  assertEqual(og.failing.map((s) => s.name).join(','), '', `synced build skills fail the audit: ${og.failing.map((s) => `${s.name} (${s.problems.join('; ')})`).join(' · ')}`);
+  assert(fs.existsSync(path.join(FRAMEWORK_ROOT, '.claude', 'hooks', 'skill-trigger.js')), 'the OG hooks are not in the product tree');
+  assert(fs.existsSync(path.join(FRAMEWORK_ROOT, '.claude', 'og-layer.json')), 'no og-layer.json manifest');
+});
+
+test('D1/F4: export refuses a tree with no wired hook and a tree whose only skills are the machine', () => {
+  const { root } = exportFixture('d1-nohooks');
+  putFile(root, '.claude/settings.json', '{"hooks":{}}\n');
+  const r = cli(['export', '--to', path.join(SCRATCH, 'out-d1-nohooks'), '--root', root]);
+  assert(r.code !== 0, 'an export wiring no hook succeeded');
+  assertIncludes(r.stderr, 'wires no hook', 'the refusal does not say why');
+  const { root: r2 } = exportFixture('d1-noskills');
+  fs.rmSync(path.join(r2, '.claude', 'skills', 'business-rule-patterns'), { recursive: true, force: true });
+  const r2r = cli(['export', '--to', path.join(SCRATCH, 'out-d1-noskills'), '--root', r2]);
+  assert(r2r.code !== 0, 'an export with no build skill succeeded');
+  assert(/no build (procedure|skill)/.test(r2r.stderr), `the refusal does not say why:\n${r2r.stderr}`);
+});
+
+test('finalize: prunes the machine in place, writes the hashed manifest, restarts history, and --check detects drift', () => {
+  const { root } = exportFixture('fin-ok');
+  putFile(root, 'tools/snbrain/snbrain.js', '// the machine\n'); putFile(root, 'tools/snbrain/lib/state.js', '// the machine\n');
+  putFile(root, '.claude/snbrain/LOOP.md', '# contract\n'); putFile(root, 'wiki-scaffold/index.md', '# scaffold\n');
+  putFile(root, 'START-HERE.md', '# start\n'); putFile(root, 'drive.config.json', '{}\n'); putFile(root, 'docs/design.md', '# design\n');
+  const brain = Brain.open(root);
+  brain.state.stamps.processName = 'HR Onboarding Checklist';
+  brain.state.facts.requestLog = { path: path.join(root, 'docs', 'wiki', 'evidence', 'read-only-proof', 'snbrain-requests.ndjson').replace(/\\/g, '/') };
+  brain.save('fixture');
+  gitCommitAll(root, 'operating history');
+  const r = cli(['finalize', '--by', 'a named operator', '--root', root]);
+  assertEqual(r.code, 0, `finalize failed:\n${r.stdout}${r.stderr}`);
+  for (const rel of ['tools/snbrain', '.claude/skills/snbrain-census', '.claude/skills/map-process', '.claude/snbrain', 'wiki-scaffold', 'START-HERE.md', 'drive.config.json', '.brain/state.json', '.brain/in', 'docs/rework-plan.md']) {
+    assert(!fs.existsSync(path.join(root, rel)), `the machine survived finalize: ${rel}`);
+  }
+  for (const rel of ['CLAUDE.md', 'AGENTS.md', '.claude/hooks/guard.js', '.claude/skills/business-rule-patterns/SKILL.md', '.brain/claims.jsonl', 'docs/wiki/index.md', 'EXPORT-MANIFEST.json', 'README.md', 'tools/render-kernel.js']) {
+    assert(fs.existsSync(path.join(root, rel)), `the deliverable lost ${rel}`);
+  }
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'EXPORT-MANIFEST.json'), 'utf8'));
+  assertEqual(manifest.verb, 'finalize');
+  assertEqual(manifest.process, 'HR Onboarding Checklist');
+  assert(manifest.files.length > 5 && manifest.files.every((f) => f.sha256), 'the finalize manifest is not hashed');
+  const log = require('child_process').spawnSync('git', ['-C', root, 'log', '--oneline'], { encoding: 'utf8' }).stdout.trim().split('\n');
+  assertEqual(log.length, 1, `history did not restart: ${log.join(' / ')}`);
+  assertIncludes(log[0], 'project brain selftest-instance / HR Onboarding Checklist', 'the first commit is not named as the prompt requires');
+  assertEqual(cli(['finalize', '--check', '--root', root]).code, 0, 'a fresh finalize does not verify clean');
+  fs.appendFileSync(path.join(root, 'docs', 'wiki', 'index.md'), '\nedited\n');
+  const c = cli(['finalize', '--check', '--root', root]);
+  assertEqual(c.code, 1, 'an edited page verified clean');
+  assertIncludes(c.stdout, 'modified: docs/wiki/index.md');
+});
+
+test('finalize: refuses below terminal success unless forced, and refuses unknown files', () => {
+  const { root } = exportFixture('fin-open', null);
+  putFile(root, 'tools/snbrain/snbrain.js', '// machine\n');
+  brainWithLog(root);
+  const r = cli(['finalize', '--by', 'someone', '--root', root]);
+  assertEqual(r.code, 3, 'finalize below success did not refuse');
+  assertIncludes(r.stderr, 'Only "success" permits handoff');
+  assert(fs.existsSync(path.join(root, 'tools', 'snbrain', 'snbrain.js')), 'a refused finalize deleted the machine');
+  const { root: r2 } = exportFixture('fin-unknown');
+  brainWithLog(r2);
+  putFile(r2, 'my-notes.txt', 'stray');
+  const u = cli(['finalize', '--by', 'someone', '--root', r2]);
+  assertEqual(u.code, 1, 'an unknown file in the root was silently pruned or shipped');
+  assertIncludes(u.stderr, 'my-notes.txt');
+  assert(fs.existsSync(path.join(r2, 'my-notes.txt')), 'the unknown file was deleted');
+});
+
+function brainWithLog(root) {
+  const brain = Brain.open(root);
+  brain.state.facts.requestLog = { path: path.join(root, 'docs', 'wiki', 'evidence', 'read-only-proof', 'snbrain-requests.ndjson').replace(/\\/g, '/') };
+  brain.save('fixture');
+}
+
+test('bootstrap-in-place: the product folder becomes the brain, a missing runner refuses before anything is written', () => {
+  const product = path.join(SCRATCH, 'boot-product');
+  const copy = (rel) => { const s = path.join(FRAMEWORK_ROOT, rel); const d = path.join(product, rel); fs.mkdirSync(path.dirname(d), { recursive: true }); fs.cpSync(s, d, { recursive: true }); };
+  for (const rel of ['tools', 'kernel', 'wiki-scaffold', 'product.config.json', 'drive.config.json']) { copy(rel); }
+  const boot = path.join(product, 'tools', 'snbrain', 'bootstrap.js');
+  const r0 = spawnSyncNode([boot, '--instance', 'acmedev', '--process', 'HR onboarding', '--runner', 'definitely-not-installed', '--wait', '0']);
+  assertEqual(r0.status, 3, `a missing runner did not refuse the bootstrap:\n${r0.stdout}${r0.stderr}`);
+  assertIncludes(r0.stderr, 'not on PATH', 'the refusal does not say the runner is missing');
+  assertIncludes(r0.stderr, 'VS Code adapter', 'the refusal does not offer the adapter option');
+  assert(!fs.existsSync(path.join(product, '.brain')), 'a refused bootstrap wrote a brain');
+  const r1 = spawnSyncNode([boot, '--instance', 'acmedev', '--process', 'HR onboarding', '--wait', '0']);
+  assertEqual(r1.status, 1, `bootstrap without a port file should exit 1 (waiting):\n${r1.stdout}${r1.stderr}`);
+  assert(fs.existsSync(path.join(product, '.brain', 'state.json')), 'the brain was not initialised IN the product folder');
+  assert(!fs.existsSync(path.join(SCRATCH, 'acmedev-hr-onboarding-brain')), 'a sibling workspace was created — the in-place decision was not applied');
+  assert(fs.existsSync(path.join(product, '.git')), 'bootstrap did not git-init the folder the render stage must commit into');
+  assert(fs.existsSync(path.join(product, 'docs', 'wiki', 'index.md')), 'the wiki scaffold was not instantiated');
+  const boot_ = JSON.parse(fs.readFileSync(path.join(product, '.brain', 'bootstrap.json'), 'utf8'));
+  assertEqual(boot_.inPlace, true);
+  assertEqual(JSON.parse(fs.readFileSync(path.join(product, 'product.config.json'), 'utf8')).instances.dev, 'acmedev', 'instances.dev was not set');
+  const sync = path.join(SCRATCH, 'boot-sync');
+  putFile(sync, '.vscode/sn-agent-port.json', JSON.stringify({ port: 1, pid: 1 }));
+  const r2 = spawnSyncNode([boot, '--instance', 'acmedev', '--process', 'HR onboarding', '--wait', '0', '--sync-root', sync, '--force']);
+  assertEqual(r2.status, 0, `bootstrap with a port file did not report ready:\n${r2.stdout}${r2.stderr}`);
+  assertIncludes(r2.stdout, 'finalize --by', 'the next steps do not end with finalize');
+});
+
+test('F1: the runner contract — detection names the VS Code adapter, a missing runner is refused with options, before spend', () => {
+  const detected = drive.detectRunners({});
+  assert(detected.some((r) => r.name === 'vscode' && r.kind === 'vscode' && r.available === false), 'the VS Code adapter is not named as an unavailable runner');
+  assert(detected.filter((r) => r.kind === 'cli').length >= 3, 'the CLI presets are not detected');
+  const msg = drive.describeUnavailable('copilot', detected.map((r) => Object.assign({}, r, { available: r.name === 'claude' })));
+  assertIncludes(msg, 'install that CLI');
+  assertIncludes(msg, 'claude', 'an available alternative runner is not offered');
+  assertIncludes(msg, 'Nothing was spent');
+  const res = drive.runStage({ name: 'vscode', kind: 'vscode' }, { prompt: 'p', brief: { text: '', file: 'b', stage: 'seed', iteration: 1 }, root: '.', model: null, toolPolicy: { readOnly: true } });
+  assertEqual(res.status, 'unavailable');
+  const root = scratchRepo('f1-run');
+  Brain.init({ root, instance: 'x', stageOrder: STAGE_ORDER });
+  // A CONFIGURED runner whose executable is not installed — the second engagement's exact shape.
+  putFile(root, 'drive.config.json', JSON.stringify({ runners: { ghost: ['definitely-not-installed-exe', '-p', '{prompt}'] } }));
+  const r = spawnSyncNode([path.join(__dirname, 'drive.js'), 'run', '--root', root, '--runner', 'ghost']);
+  assertEqual(r.status, 2, 'drive run did not refuse a missing runner before the first brief');
+  assertIncludes(r.stderr, 'not on PATH');
+  assert(!fs.existsSync(path.join(root, '.brain', 'briefs')), 'a brief was written for a runner that cannot run it');
+});
 
 const failed = results.filter((r) => !r.ok);
 process.stdout.write(`\n${results.length - failed.length}/${results.length} passed`);

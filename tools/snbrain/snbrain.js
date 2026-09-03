@@ -41,6 +41,8 @@ const stages = require('./lib/stages');
 const { STAGE_BY_ID, STAGE_ORDER, HARD_RULES, ENVELOPE_SCHEMA, staleClaims, boundaryCastStages } = stages;
 /** PRODUCT-97. The render stage's last act is a commit, and this is what a commit means here. */
 const deliverable = require('./lib/deliverable');
+/** F8/F11/F12/F13/D1 (2026-09-02). What must be true of a tree before it leaves this machine. */
+const handoff = require('./lib/handoff');
 
 const EXIT_OK = 0, EXIT_REJECTED = 1, EXIT_USAGE = 2, EXIT_TERMINAL = 3;
 
@@ -107,8 +109,18 @@ function usage() {
     '                             Refused while the budget can still pay for re-querying them, and the',
     '                             refusal shows the arithmetic. --by must be a person, not the loop.',
     `  node ${SELF} export    --to <dir> [--root <dir>] [--dry-run]`,
-    '                             refuses unless the run is terminal "success";',
+    '                             refuses unless the run is terminal "success"; refuses a missing REQUIRED entry,',
+    '                             a placeholder in a live page, a dangling kernel route, an untriggerable skill;',
+    '                             writes EXPORT-MANIFEST.json with a sha256 per file',
     '                             [--force --by <name> --reason <text>] exports anyway and stamps the kernel',
+    `  node ${SELF} verify-export --dir <exported dir>`,
+    '                             compare the tree to its manifest: any add, delete or modify fails',
+    `  node ${SELF} finalize  --by <name> [--root <dir>] [--force --reason <text>] [--prune-unknown] | --check`,
+    '                             IN PLACE: prune the machine, regenerate the proof, run the handoff checks,',
+    '                             write the hashed manifest, re-init git at "project brain <instance> / <process>"',
+    `  node ${SELF} skills-audit [--root <dir>] [--json]`,
+    '                             every .claude/skills/*/SKILL.md must be routable (quoted trigger phrases) and',
+    '                             reachable from the kernel; a failure is a BLOCKING finding',
     `  node ${SELF} isolate   --port-from <repo> --to <clean-sync-root>`,
     '',
     'export ships the DELIVERABLE and withholds the MACHINE: kernel, hooks, wiki, build skills',
@@ -579,6 +591,14 @@ function cmdIngest(a) {
     const logPath = path.resolve(brain.root, usage.requestLog);
     const total = countRequestLog(logPath);
     if (total !== null) {
+      /*
+       * F12 (2026-09-02). THE LOG'S PATH IS RUN STATE, not a convention. The second engagement
+       * captured 375 read-only calls under spikes/scriptsync-read-corrected/ and export looked
+       * only at the default path, reported it absent, and shipped without the proof. Every
+       * stage names its log here; the last resolved path is what export, finalize and the
+       * proof page read.
+       */
+      state.facts.requestLog = { path: fwd(logPath), lastSeenStage: stage.id, lastCount: total, at: new Date().toISOString() };
       const attributed = state.budget.logCountedTotal || 0;
       apiCalls = Math.max(0, total - attributed);
       state.budget.logCountedTotal = total;
@@ -1235,23 +1255,32 @@ function cmdFinish(a) {
  * The DENY patterns below are a second, redundant assertion over the already-selected
  * set, so a mistake in the allowlist is caught rather than shipped.
  */
+/*
+ * F12 / F13 (2026-09-02): entries carry `required`. A required entry that is absent REFUSES the
+ * export (or finalize) instead of printing "absent, skipped" — the second engagement shipped
+ * without its read-only proof exactly that way. The proof itself now lives under the wiki at a
+ * stable name (render --proof copies it there from wherever the run kept it), so it ships by
+ * the wiki entry; the operating-path log entry below stays optional.
+ */
 const EXPORT_ALLOW = [
-  { path: 'CLAUDE.md', kind: 'file', why: 'the kernel' },
-  { path: '.github/copilot-instructions.md', kind: 'file', why: 'the Copilot kernel mirror' },
-  { path: '.claude/settings.json', kind: 'file', why: 'hook wiring — enforcement, not prose' },
-  { path: '.claude/hooks', kind: 'dir', why: 'the enforcement hooks themselves' },
+  { path: 'CLAUDE.md', kind: 'file', why: 'the kernel', required: true },
+  { path: '.github/copilot-instructions.md', kind: 'file', why: 'the Copilot kernel mirror', required: true },
+  { path: 'AGENTS.md', kind: 'file', why: 'the Codex kernel mirror', required: true },
+  { path: '.claude/settings.json', kind: 'file', why: 'hook wiring — enforcement, not prose', required: true },
+  { path: '.claude/hooks', kind: 'dir', why: 'the enforcement hooks themselves', required: true },
   // THE PAYLOAD. This is why the customer can develop agentically the moment they open the
   // repo, and it is the whole point of the deliverable. It necessarily overlaps the deny
-  // screen — the nine snbrain-* stage skills live in this same directory — which is exactly
-  // why the screen FILTERS rather than aborts, and reports every file it held back.
-  { path: '.claude/skills', kind: 'dir', why: 'the build-procedure skills' },
+  // screen — the stage skills live in this same directory — which is exactly why the screen
+  // FILTERS rather than aborts, and reports every file it held back.
+  { path: '.claude/skills', kind: 'dir', why: 'the build-procedure skills — the whole day-2 library', required: true },
+  { path: '.claude/og-layer.json', kind: 'file', why: 'which hooks and build skills shipped, from which source commit, with digests' },
   { path: '.claude/commands', kind: 'dir', why: 'slash commands, minus the ones that drive the loop' },
-  { path: 'docs/wiki', kind: 'dir', why: 'the brain: registry, decisions, gotchas, conventions, TBDs, stories' },
-  { path: 'product.config.json', kind: 'file', why: 'their slots, their instance' },
-  { path: 'tools/render-kernel.js', kind: 'file', why: 'so they can re-render the kernel after editing config' },
-  { path: 'kernel', kind: 'dir', why: 'the kernel template render-kernel.js needs' },
-  { path: '.brain/claims.jsonl', kind: 'file', why: 'their evidence, and what makes the wiki re-verifiable' },
-  { path: '.brain/decisions.jsonl', kind: 'file', why: 'the decision ledger — the actual product of the engagement' },
+  { path: 'docs/wiki', kind: 'dir', why: 'the brain: registry, decisions, gotchas, conventions, TBDs, stories, evidence, the read-only proof', required: true },
+  { path: 'product.config.json', kind: 'file', why: 'their slots, their instance', required: true },
+  { path: 'tools/render-kernel.js', kind: 'file', why: 'so they can re-render the kernel after editing config', required: true },
+  { path: 'kernel', kind: 'dir', why: 'the kernel template render-kernel.js needs', required: true },
+  { path: '.brain/claims.jsonl', kind: 'file', why: 'their evidence, and what makes the wiki re-verifiable', required: true },
+  { path: '.brain/decisions.jsonl', kind: 'file', why: 'the decision ledger — the actual product of the engagement', required: true },
   { path: '.brain/index', kind: 'dir', why: 'claim-to-decision reverse index' },
   { path: 'probes', kind: 'dir', why: 'the acceptance probe suite, so they can measure their own brain' },
   /*
@@ -1273,9 +1302,11 @@ const EXPORT_ALLOW = [
  * stamps — a readable blueprint of the loop even with no source shipped.
  */
 const EXPORT_DENY = [
-  /(^|[\\/])snbrain-[a-z]+([\\/]|$)/i,        // the nine stage skills
+  /(^|[\\/])snbrain-[a-z]+([\\/]|$)/i,        // the stage skills
   /(^|[\\/])tools[\\/]snbrain([\\/]|$)/i,     // the CLI, the probes, the read-only client
   /(^|[\\/])bootstrap-project-brain([\\/]|$)/i,
+  // F4 (2026-09-02): the seeded orchestrator leaked into the first run's export. It is the machine.
+  /(^|[\\/])\.claude[\\/]skills[\\/]map-process([\\/]|$)/i,
   /*
    * ANCHORED, and it has to be. The previous form was
    *   /\.brain[\\/](in|raw|findings|locks|state\.json|history\.ndjson)/
@@ -1317,14 +1348,12 @@ function summariseWithheld(withheld) {
   return [...groups.entries()].sort().map(([k, n]) => `${k}  (${n} file${n === 1 ? '' : 's'})`);
 }
 
-function cmdExport(a) {
-  const brain = Brain.open(a.root || process.cwd());
-  const state = brain.state;
-  const dest = a.to;
-  if (!dest) { err('export: --to <dir> is required (the deliverable repo to create).'); return EXIT_USAGE; }
-
-  // Gather the allowlisted set, then re-screen ALL of it against the deny patterns.
-  const src = brain.root;
+/**
+ * The export SELECTION, shared by `export` (to a directory) and `finalize` (in place): the
+ * allowlisted set re-screened against the deny patterns, the required entries that are absent,
+ * and the kernel routes that name a skill the selection does not carry.
+ */
+function selectExport(src) {
   const selected = [];
   const missing = [];
   for (const entry of EXPORT_ALLOW) {
@@ -1365,14 +1394,97 @@ function cmdExport(a) {
       dangling.push(skill + (denied ? '  (withheld by policy — remove it from the routing map)' : '  (present here but not selected by the allowlist)'));
     }
   }
+  return { selected, missing, requiredMissing: missing.filter((e) => e.required), withheld, ship, shipped, dangling };
+}
+
+/**
+ * F8 / F11 / F12 / D1 — what must be true of a tree that is about to be handed over, checked on
+ * THAT tree (the export destination, or the pruned root at finalize), with the same code the
+ * render stage ran. Returns problem sentences; empty means clean.
+ */
+function handoffProblems(root, opts) {
+  const o = opts || {};
+  const problems = [];
+  let wiki = 'docs/wiki';
+  try { const cfg = JSON.parse(fs.readFileSync(path.join(root, 'product.config.json'), 'utf8').replace(/^﻿/, '')); if (cfg.paths && cfg.paths.wikiRoot) { wiki = String(cfg.paths.wikiRoot).replace(/\/+$/, ''); } } catch (e) { /* default */ }
+  const files = handoff.listFiles(root, wiki).concat(['CLAUDE.md', '.github/copilot-instructions.md', 'AGENTS.md'].filter((f) => fs.existsSync(path.join(root, f))));
+  const scan = handoff.scanPlaceholders(root, files);
+  const described = handoff.describePlaceholders(scan);
+  if (described) { problems.push(described); }
+  if (fs.existsSync(path.join(root, 'CLAUDE.md'))) {
+    const routes = handoff.kernelRouteProblems(root, 'CLAUDE.md');
+    if (routes.length) { problems.push(`${routes.length} kernel route(s) resolve to nothing in the handed-over tree: ${routes.slice(0, 4).join('; ')}${routes.length > 4 ? '; …' : ''}`); }
+    for (const mirror of ['.github/copilot-instructions.md', 'AGENTS.md']) {
+      const abs = path.join(root, mirror);
+      if (!fs.existsSync(abs)) { problems.push(`kernel mirror ${mirror} is missing — render-kernel.js writes all three; re-run it`); continue; }
+      const norm = (t) => t.replace(/\r\n/g, '\n').replace(/^> \[!WARNING\][\s\S]*?\n\n\n/, '');
+      if (norm(fs.readFileSync(abs, 'utf8')) !== norm(fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8'))) { problems.push(`kernel mirror ${mirror} differs from CLAUDE.md — a hand edit of a rendered kernel; re-run node tools/render-kernel.js`); }
+    }
+  } else { problems.push('CLAUDE.md is missing — there is no kernel to hand over'); }
+  const proof = path.join(root, wiki, 'evidence', 'read-only-proof.md');
+  if (!o.skipProof) {
+    if (!fs.existsSync(proof)) {
+      problems.push(`required proof ${wiki}/evidence/read-only-proof.md is missing — the read-only proof is required handoff evidence; generate it with node tools/snbrain/render.js --root . --proof (it resolves the request log from run state)`);
+    } else {
+      for (const rel of [`${wiki}/evidence/read-only-proof/snbrain-requests.ndjson`]) {
+        if (!fs.existsSync(path.join(root, rel))) { problems.push(`the proof page cites ${rel} and it is not in the tree`); }
+      }
+    }
+  }
+  const audit = handoff.auditSkills(root);
+  const auditText = handoff.describeSkillsAudit(audit);
+  if (auditText) { problems.push(`skills audit: ${auditText}`); }
+  const settingsAbs = path.join(root, '.claude', 'settings.json');
+  if (fs.existsSync(settingsAbs)) {
+    let settings = null;
+    try { settings = JSON.parse(fs.readFileSync(settingsAbs, 'utf8')); } catch (e) { problems.push('.claude/settings.json is not valid JSON'); }
+    const commands = [];
+    for (const list of Object.values((settings && settings.hooks) || {})) {
+      for (const entry of list || []) { for (const h of (entry.hooks || [])) { if (h && h.command) { commands.push(h.command); } } }
+    }
+    const missingHooks = commands.map((c) => (/node\s+(\S+)/.exec(c) || [])[1]).filter(Boolean).filter((p) => !fs.existsSync(path.join(root, p)));
+    if (missingHooks.length) { problems.push(`${missingHooks.length} wired hook script(s) do not exist on disk: ${missingHooks.join(', ')}`); }
+    if (!commands.length) { problems.push('.claude/settings.json wires no hook at all: enforcement in prose is a suggestion'); }
+  } else { problems.push('.claude/settings.json is missing — no enforcement is wired'); }
+  return problems;
+}
+
+/** The manifest, from the tree it describes. `relFiles` is what the tree is supposed to hold. */
+function buildManifest(dest, relFiles, meta) {
+  const files = handoff.fileTable(dest, relFiles);
+  const present = new Set(files.map((f) => f.path));
+  // The mirrors that ARE in the tree are asserted by verify; a mirror forced past is recorded
+  // in `forced`, not asserted — a forced export must not fail its own self-check on purpose.
+  const kernels = ['CLAUDE.md', '.github/copilot-instructions.md', 'AGENTS.md'].filter((k) => present.has(k));
+  let commit = null;
+  try { const r = require('child_process').spawnSync('git', ['-C', path.resolve(__dirname, '..', '..'), 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }); commit = r.status === 0 ? r.stdout.trim() : null; } catch (e) { commit = null; }
+  return Object.assign({
+    manifestVersion: 2,
+    generator: { name: 'sn-process-brain/snbrain', commit, engineSchema: meta.engineSchema || null, verb: meta.verb || 'export' },
+    kernels,
+    fileCount: files.length,
+    bytes: files.reduce((n, f) => n + f.bytes, 0),
+    files,
+    verify: 'node tools/snbrain/snbrain.js verify-export --dir <this directory>   (or: snbrain finalize --check, in place)',
+  }, meta);
+}
+
+function cmdExport(a) {
+  const brain = Brain.open(a.root || process.cwd());
+  const state = brain.state;
+  const dest = a.to;
+  if (!dest) { err('export: --to <dir> is required (the deliverable repo to create).'); return EXIT_USAGE; }
+
+  const src = brain.root;
+  const { missing, requiredMissing, withheld, ship, dangling } = selectExport(src);
 
   if (a['dry-run']) {
     out(`export DRY RUN  ${src}  ->  ${dest}`);
     out(`  ${ship.length} file(s) would ship · ${withheld.length} withheld by policy`);
-    missing.forEach((e) => out(`  absent, skipped : ${e.path}  (${e.why})`));
+    missing.forEach((e) => out(`  ${e.required ? 'REQUIRED, ABSENT' : 'absent, skipped '} : ${e.path}  (${e.why})`));
     summariseWithheld(withheld).forEach((line) => out(`  withheld        : ${line}`));
     dangling.forEach((d) => out(`  DANGLING ROUTE  : ${d}`));
-    return dangling.length ? EXIT_REJECTED : EXIT_OK;
+    return (dangling.length || requiredMissing.length) ? EXIT_REJECTED : EXIT_OK;
   }
 
   /*
@@ -1408,6 +1520,17 @@ function cmdExport(a) {
       err('export --force requires --by <name> and --reason <text>. An unattributed override of the handoff gate is exactly the silent failure this gate exists to stop.');
       return EXIT_USAGE;
     }
+  }
+  /*
+   * F12: REQUIRED EVIDENCE MAY NOT BE SKIPPED. "absent, skipped" was the second engagement's
+   * whole read-only proof. A required allowlist entry that is absent refuses the export; --force
+   * (attributed) records the omission in the manifest instead of hiding it.
+   */
+  if (requiredMissing.length && !forced) {
+    err(`export refused: ${requiredMissing.length} REQUIRED entr${requiredMissing.length === 1 ? 'y is' : 'ies are'} absent from ${src}:`);
+    requiredMissing.forEach((e) => err(`  - ${e.path}  (${e.why})`));
+    err('Generate what is missing (render-kernel.js for the mirrors, render.js --proof for the proof, --scaffold/--gates for the wiki and hooks), or export deliberately with --force --by --reason.');
+    return EXIT_REJECTED;
   }
 
   /*
@@ -1455,32 +1578,51 @@ function cmdExport(a) {
     }
   }
 
-  const manifest = {
+  /*
+   * F8 / F11 / D1 ON THE SHIPPED TREE. The render stage ran these on the operating repo; a route
+   * that resolved there can dangle here (the machine's files are withheld), and a placeholder
+   * introduced by a later hand edit is invisible to a check that ran at render time. Refused
+   * unless forced; forced problems are recorded in the manifest, never hidden.
+   */
+  const problems = handoffProblems(dest);
+  if (problems.length && !forced) {
+    err(`export refused: the shipped tree at ${fwd(dest)} is not fit for handoff —`);
+    problems.forEach((p) => err(wrap('- ' + p, 2)));
+    err('The files were written so you can inspect them; fix the source and export again.');
+    return EXIT_REJECTED;
+  }
+
+  const manifest = buildManifest(dest, ship.map((f) => f.rel), {
+    verb: 'export',
+    engineSchema: state.version || null,
     exportedAt: new Date().toISOString(),
     instance: state.instance,
     runId: state.runId,
+    process: (state.stamps && state.stamps.processName) || null,
     terminal: state.terminal,
-    handoffPermitted: state.terminal === 'success',
-    forced: (forced && state.terminal !== 'success')
-      ? { by: a.by, reason: a.reason, at: new Date().toISOString(), blockers: brain.successBlockers() }
+    handoffPermitted: state.terminal === 'success' && !problems.length,
+    forced: (forced && (state.terminal !== 'success' || problems.length || requiredMissing.length))
+      ? { by: a.by, reason: a.reason, at: new Date().toISOString(), blockers: brain.successBlockers(), problems, requiredMissing: requiredMissing.map((e) => e.path) }
       : null,
     claims: state.counters.claims,
     decisions: state.counters.decisions,
-    files: ship.length,
     compaction,
     withheldCount: withheld.length,
-    withheld: 'The snbrain discovery loop (tools/snbrain, the snbrain-* stage skills, LOOP.md, the stage artifacts) is deliberately not part of this export.',
+    withheld: 'The snbrain discovery loop (tools/snbrain, the stage skills, map-process, LOOP.md, the stage artifacts) is deliberately not part of this export.',
     dangling,
-  };
-  fs.writeFileSync(path.join(dest, 'EXPORT-MANIFEST.json'), JSON.stringify(manifest, null, 2) + '\n');
+    required: EXPORT_ALLOW.filter((e) => e.required).map((e) => e.path),
+  });
+  fs.writeFileSync(path.join(dest, handoff.MANIFEST_NAME), JSON.stringify(manifest, null, 2) + '\n');
+  const self = handoff.verifyManifest(dest);
 
   out(`exported  ${src}  ->  ${dest}`);
-  out(`  ${ship.length} file(s) · ${state.counters.claims} claim(s) · ${state.counters.decisions} decision(s)`);
+  out(`  ${ship.length} file(s) · ${state.counters.claims} claim(s) · ${state.counters.decisions} decision(s) · manifest sha256 over ${manifest.fileCount} file(s), self-verified: ${self.ok ? 'clean' : 'NOT CLEAN — ' + JSON.stringify({ added: self.added, deleted: self.deleted, modified: self.modified })}`);
   for (const [rel, c] of Object.entries(compaction)) {
     if (c.linesBefore === c.linesAfter) { continue; }
     out(`  compacted ${rel}: ${c.linesBefore} lines -> ${c.linesAfter} (${mb(c.bytesBefore)} -> ${mb(c.bytesAfter)}), one row per record instead of one per record per stage`);
   }
-  missing.forEach((e) => out(`  absent, skipped : ${e.path}`));
+  missing.forEach((e) => out(`  ${e.required ? 'REQUIRED, ABSENT (forced)' : 'absent, skipped'} : ${e.path}`));
+  problems.forEach((p) => out(wrap(`  FORCED PAST: ${p}`, 2)));
   out('');
   out(`  WITHHELD BY POLICY (${withheld.length} file(s)) — the machine, not the payload:`);
   summariseWithheld(withheld).forEach((line) => out(`    ${line}`));
@@ -1496,7 +1638,213 @@ function cmdExport(a) {
     out(`  Attributed to ${a.by}: ${a.reason}`);
     out('  CLAUDE.md carries a NOT FIT FOR HANDOFF banner, so the next reader learns it from the repo.');
   }
-  return dangling.length ? EXIT_REJECTED : EXIT_OK;
+  return (dangling.length || !self.ok) ? EXIT_REJECTED : EXIT_OK;
+}
+
+/* ============================================================ verify-export ===
+ * F13. The manifest describes the tree; this proves the tree still matches it. Any add,
+ * delete or modify after generation fails — a bare file count cannot tell a regenerated
+ * kernel from an untouched one, which is how the Codex mirror went missing unnoticed.
+ */
+function cmdVerifyExport(a) {
+  const dir = path.resolve(a.dir && a.dir !== true ? a.dir : (a.root && a.root !== true ? a.root : process.cwd()));
+  const r = handoff.verifyManifest(dir);
+  if (r.error) { err(`verify-export: ${r.error}`); return EXIT_REJECTED; }
+  if (a.json) { json(Object.assign({}, r, { manifest: undefined, dir: fwd(dir) })); return r.ok ? EXIT_OK : EXIT_REJECTED; }
+  out(`verify-export ${fwd(dir)}: ${r.ok ? 'CLEAN' : 'DRIFTED'} — ${r.fileCount} file(s) in the manifest` +
+    `${r.manifest && r.manifest.generator ? ` (generator ${r.manifest.generator.name} @ ${r.manifest.generator.commit || '?'}, ${r.manifest.verb || r.manifest.generator.verb})` : ''}`);
+  const list = (label, arr) => { if (arr && arr.length) { out(`  ${label} (${arr.length}): ${arr.slice(0, 12).join(', ')}${arr.length > 12 ? ', …' : ''}`); } };
+  list('added since export', r.added);
+  list('deleted since export', r.deleted);
+  list('modified since export', r.modified);
+  list('kernel mirrors missing', r.kernelsMissing);
+  if (r.manifest && r.manifest.forced) { out(`  NOTE: this export was FORCED by ${r.manifest.forced.by}: ${r.manifest.forced.reason}`); }
+  return r.ok ? EXIT_OK : EXIT_REJECTED;
+}
+
+/* ============================================================ skills-audit ===
+ * D1. Every build skill must be routable (quoted trigger phrases in its description) and
+ * reachable from the kernel. Runs at render (a rejection), at finalize (a refusal) and on
+ * demand here; inside a brain it also records the failures as BLOCKING findings, so a skill
+ * added after the run cannot ship untriggerable.
+ */
+function cmdSkillsAudit(a) {
+  const root = path.resolve(a.root && a.root !== true ? a.root : process.cwd());
+  const audit = handoff.auditSkills(root);
+  const text = handoff.describeSkillsAudit(audit);
+  if (a.json) { json(Object.assign({}, audit, { problem: text || null })); return text ? EXIT_REJECTED : EXIT_OK; }
+  out(`skills-audit ${fwd(root)}: ${audit.buildSkills} build skill(s), ${audit.machineSkills} machine skill(s) (exempt), ` +
+    `kernel ${audit.kernelPresent ? `${audit.kernelPath} ${audit.dirRoute ? 'carries the .claude/skills/ route' : 'has no .claude/skills/ route'}` : 'ABSENT'}, ` +
+    `${audit.namedInTable.length} slug(s) named in routing rows`);
+  for (const s of audit.skills) {
+    out(`  ${s.problems.length && !s.machine ? 'FAIL' : ' ok '} ${s.name.padEnd(36)} ${s.machine ? 'machine' : `${s.phrases} phrase(s)`}${s.problems.length ? ` — ${s.problems.join('; ')}` : ''}`);
+  }
+  if (text) {
+    out('');
+    out(wrap(`BLOCKING: ${text}`, 2));
+    if (Brain.exists(root) && !a['no-record']) {
+      const brain = Brain.open(root);
+      brain.upsertFindings([{ check: 'skills-audit', severity: 'blocking', rung: 'L1', locus: { table: 'skills', sysId: 'audit' }, message: `skills-audit: ${text}` }], { stage: brain.state.stage });
+      brain.save('skills-audit', { failing: audit.failing.map((s) => s.name) });
+      out('  recorded as a blocking finding (skills-audit); close it with `snbrain disposition` once fixed.');
+    }
+    return EXIT_REJECTED;
+  }
+  return EXIT_OK;
+}
+
+/* ============================================================ finalize ========
+ * D2. The cloned product folder IS the engagement root; finalize turns it into the
+ * deliverable IN PLACE: prunes the machine and the run's scratch, regenerates the proof,
+ * checks handoff hygiene with the same code export uses, writes the hashed manifest,
+ * re-initialises git so history starts at "project brain <instance> / <process>", and
+ * verifies the manifest against the tree it just committed.
+ *
+ * Everything it deletes is NAMED (the machine and the run scratch); files the extension owns
+ * are kept and listed as ignored in the manifest; anything else it does not recognise
+ * refuses the finalize, so a developer's stray file is never silently deleted or shipped.
+ */
+const FINALIZE_PRUNE = [
+  'tools/snbrain', 'tools/build-dist.js', 'tools/scrub-traces.js', 'tools/sync-og-layer.js',
+  '.claude/snbrain', 'drive.config.json', 'START-HERE.md', 'PROVENANCE.md', 'TRANSFER.md',
+  'wiki-scaffold', 'dist', 'docs/design.md', 'docs/first-run.md', 'docs/rework-plan.md',
+  '.brain/in', '.brain/raw', '.brain/locks', '.brain/briefs', '.brain/workers',
+  '.brain/state.json', '.brain/history.ndjson', '.brain/findings.jsonl', '.brain/questions.jsonl',
+  '.brain/drive.ndjson', '.brain/bootstrap.json',
+];
+const FINALIZE_PRUNE_RE = [/^\.claude\/skills\/snbrain-[a-z-]+$/, /^\.claude\/skills\/map-process$/, /^\.claude\/skills\/bootstrap-project-brain$/, /^docs\/(handoff-prompt|findings-response|exam)-.*\.md$/, /^\.brain\/.*\.log$/, /^\.brain\/drive-console.*$/];
+/** Extension- and editor-owned paths: kept on disk, listed as ignored, never in the manifest. */
+const FINALIZE_IGNORE = ['.vscode', 'agentinstructions.md', 'agentrules', 'autocomplete', 'spikes', '.mcp.json', '.claude/settings.local.json', 'node_modules', '.git'];
+
+function cmdFinalize(a) {
+  const root = path.resolve(a.root && a.root !== true ? a.root : process.cwd());
+  if (a.check) {
+    const r = handoff.verifyManifest(root);
+    if (r.error) { err(`finalize --check: ${r.error}`); return EXIT_REJECTED; }
+    out(`finalize --check ${fwd(root)}: ${r.ok ? 'CLEAN' : 'DRIFTED'} — ${r.fileCount} file(s) in the manifest${r.added.length ? `; added ${r.added.length}` : ''}${r.deleted.length ? `; deleted ${r.deleted.length}` : ''}${r.modified.length ? `; modified ${r.modified.length}` : ''}`);
+    [...r.added.map((p) => `added: ${p}`), ...r.deleted.map((p) => `deleted: ${p}`), ...r.modified.map((p) => `modified: ${p}`)].slice(0, 30).forEach((l) => out(`  ${l}`));
+    return r.ok ? EXIT_OK : EXIT_REJECTED;
+  }
+  if (!a.by || a.by === true) { err('finalize requires --by <name>. Re-initialising a repository\'s history is attributed.'); return EXIT_USAGE; }
+  if (!Brain.exists(root)) { err(`finalize: no brain at ${fwd(root)} (.brain/state.json). Finalize runs in the engagement root after the loop reached terminal success.`); return EXIT_USAGE; }
+  const brain = Brain.open(root);
+  const state = brain.state;
+  const forced = !!a.force;
+  const bootstrap = fs.existsSync(path.join(root, '.brain', 'bootstrap.json')) ? JSON.parse(fs.readFileSync(path.join(root, '.brain', 'bootstrap.json'), 'utf8')) : {};
+  const processName = (state.stamps && state.stamps.processName) || bootstrap.process || '(unnamed process)';
+
+  if (state.terminal !== 'success') {
+    if (!forced) {
+      err(`finalize refused: this run's terminal state is "${state.terminal || 'open — it never reached one'}", not "success". Only "success" permits handoff.`);
+      const blockers = brain.successBlockers();
+      if (blockers.length) { err('What stands in the way:'); blockers.forEach((b) => err(wrap('- ' + b, 2))); }
+      err(`Clear those, or finalize deliberately: node ${SELF} finalize --by <name> --force --reason <text>`);
+      return EXIT_TERMINAL;
+    }
+    if (!a.reason || a.reason === true) { err('finalize --force requires --reason <text>.'); return EXIT_USAGE; }
+  }
+
+  // 1. Regenerate the proof from run state (the log's operating path may be about to be pruned).
+  const renderJs = path.join(__dirname, 'render.js');
+  const proof = require('child_process').spawnSync(process.execPath, [renderJs, '--root', root, '--proof'], { encoding: 'utf8' });
+  out(proof.stdout.trim());
+  if (proof.status !== 0 && !forced) { err('finalize refused: the read-only proof could not be generated (see above). It is required handoff evidence.'); return EXIT_REJECTED; }
+
+  // 2. Hygiene on the operating tree, BEFORE anything is deleted.
+  const problems = handoffProblems(root);
+  const audit = handoff.auditSkills(root);
+  if (problems.length && !forced) {
+    err('finalize refused: the tree is not fit for handoff —');
+    problems.forEach((p) => err(wrap('- ' + p, 2)));
+    if (audit.failing.length) { brain.upsertFindings([{ check: 'skills-audit', severity: 'blocking', rung: 'L1', locus: { table: 'skills', sysId: 'audit' }, message: `skills-audit at finalize: ${handoff.describeSkillsAudit(audit)}` }], { stage: state.stage }); brain.save('skills-audit'); }
+    err('Nothing was deleted. Fix the source, re-render, and run finalize again.');
+    return EXIT_REJECTED;
+  }
+
+  // 3. Unknown files refuse; the operator decides what they are.
+  const top = fs.readdirSync(root).filter((n) => n !== '.git');
+  const known = new Set(['CLAUDE.md', 'AGENTS.md', '.github', '.claude', 'docs', 'kernel', 'tools', 'product.config.json', '.brain', 'README.md', '.gitignore', '.gitattributes', 'LICENSE', 'LICENSE.md', 'probes', 'drive.config.json', 'START-HERE.md', 'PROVENANCE.md', 'TRANSFER.md', 'wiki-scaffold', 'dist', handoff.MANIFEST_NAME]);
+  const ignored = FINALIZE_IGNORE.filter((p) => fs.existsSync(path.join(root, p)));
+  const instanceDirs = top.filter((n) => fs.existsSync(path.join(root, n, '_settings.json')) || fs.existsSync(path.join(root, n, 'settings.json')) && !known.has(n));
+  const unknown = top.filter((n) => !known.has(n) && !FINALIZE_IGNORE.includes(n) && !instanceDirs.includes(n));
+  if (unknown.length && !a['prune-unknown']) {
+    err(`finalize refused: ${unknown.length} path(s) in ${fwd(root)} are neither deliverable, machine nor extension-owned: ${unknown.join(', ')}.`);
+    err('Move or delete them, or pass --prune-unknown to delete them here (they are not in the deliverable either way).');
+    return EXIT_REJECTED;
+  }
+
+  // 4. Prune the machine and the run scratch. Named, and printed.
+  const pruned = [];
+  const rmrf = (rel) => { const abs = path.join(root, rel); if (fs.existsSync(abs)) { fs.rmSync(abs, { recursive: true, force: true }); pruned.push(rel); } };
+  for (const rel of FINALIZE_PRUNE) { rmrf(rel); }
+  const skillsDir = path.join(root, '.claude', 'skills');
+  if (fs.existsSync(skillsDir)) { for (const n of fs.readdirSync(skillsDir)) { const rel = `.claude/skills/${n}`; if (FINALIZE_PRUNE_RE.some((re) => re.test(rel))) { rmrf(rel); } } }
+  const docsDir = path.join(root, 'docs');
+  if (fs.existsSync(docsDir)) { for (const n of fs.readdirSync(docsDir)) { const rel = `docs/${n}`; if (FINALIZE_PRUNE_RE.some((re) => re.test(rel))) { rmrf(rel); } } }
+  const brainDir = path.join(root, '.brain');
+  if (fs.existsSync(brainDir)) { for (const n of fs.readdirSync(brainDir)) { const rel = `.brain/${n}`; if (FINALIZE_PRUNE_RE.some((re) => re.test(rel))) { rmrf(rel); } } }
+  if (a['prune-unknown']) { for (const n of unknown) { rmrf(n); } }
+  for (const rel of ['tools', 'docs']) { const abs = path.join(root, rel); if (fs.existsSync(abs) && !fs.readdirSync(abs).length) { fs.rmdirSync(abs); } }
+
+  // 5. The deliverable's own README and .gitignore (the product's ignored the ledgers on purpose).
+  fs.writeFileSync(path.join(root, 'README.md'), [
+    `# Project brain — ${processName} on ${state.instance}`, '',
+    `Built by sn-process-brain run \`${state.runId}\`, finalized ${new Date().toISOString().slice(0, 10)} by ${a.by}.`, '',
+    'Start with `CLAUDE.md` (identical mirrors: `.github/copilot-instructions.md`, `AGENTS.md`). The wiki lives under',
+    `\`${(readWikiRoot(root))}/\` — its index is the entry point; the evidence appendix and the read-only proof are under \`evidence/\`.`, '',
+    `Integrity: \`${handoff.MANIFEST_NAME}\` lists every file with its sha256; any add, delete or edit after finalize fails`,
+    '`snbrain finalize --check` (the CLI itself is not shipped; the check is a sha256 comparison anyone can re-run).', '',
+    'Re-render the kernel after editing `product.config.json`: `node tools/render-kernel.js`.', '',
+  ].join('\n'));
+  fs.writeFileSync(path.join(root, '.gitignore'), [
+    '# Deliverable repo — written by snbrain finalize.',
+    '# The ledgers under .brain/ ARE the evidence base and are committed on purpose.',
+    '**/_settings.json', '**/settings.json', '!.claude/settings.json', '!.vscode/settings.json',
+    '.mcp.json', '**/_last_error.json', '**/_requests.json', '**/_requests.log', '**/agent/requests/', '**/agent/responses/', '**/agent/_*',
+    '.vscode/sn-agent-port.json', '.claude/settings.local.json', '.claude/scheduled_tasks.lock',
+    'agentinstructions.md', 'agentrules/', 'autocomplete/', 'spikes/', 'node_modules/', '.DS_Store', 'Thumbs.db',
+    ...instanceDirs.map((d) => `/${d}/`), '',
+  ].join('\n'));
+
+  // 6. The manifest over what remains (minus the ignored, extension-owned paths).
+  const ignoreSet = new Set(ignored.concat(instanceDirs));
+  const remaining = handoff.treeFiles(root).filter((rel) => !ignoreSet.has(rel.split('/')[0]) && !ignoreSet.has(rel));
+  const manifest = buildManifest(root, remaining, {
+    verb: 'finalize', engineSchema: state.version || null,
+    finalizedAt: new Date().toISOString(), finalizedBy: a.by,
+    instance: state.instance, runId: state.runId, process: processName,
+    terminal: state.terminal, handoffPermitted: state.terminal === 'success' && !problems.length,
+    forced: forced && (state.terminal !== 'success' || problems.length) ? { by: a.by, reason: a.reason || null, blockers: brain.successBlockers(), problems } : null,
+    claims: state.counters.claims, decisions: state.counters.decisions,
+    pruned, ignored: [...ignoreSet],
+    required: EXPORT_ALLOW.filter((e) => e.required).map((e) => e.path),
+  });
+  fs.writeFileSync(path.join(root, handoff.MANIFEST_NAME), JSON.stringify(manifest, null, 2) + '\n');
+
+  // 7. History starts here.
+  const git = (args) => require('child_process').spawnSync('git', ['-C', root].concat(args), { encoding: 'utf8', windowsHide: true });
+  fs.rmSync(path.join(root, '.git'), { recursive: true, force: true });
+  git(['init', '-q']);
+  if (!git(['config', 'user.name']).stdout.trim()) { git(['config', 'user.name', a.by]); git(['config', 'user.email', 'finalize@snbrain.invalid']); }
+  git(['add', '-A']);
+  const commit = git(['commit', '-q', '-m', `project brain ${state.instance} / ${processName}\n\nFinalized by ${a.by} from sn-process-brain run ${state.runId}. ${manifest.fileCount} file(s), sha256 in ${handoff.MANIFEST_NAME}.`]);
+  if (commit.status !== 0) { err(`finalize: git commit failed: ${commit.stderr || commit.stdout}`); return EXIT_REJECTED; }
+  const sha = git(['rev-parse', '--short', 'HEAD']).stdout.trim();
+
+  // 8. Prove it.
+  const verify = handoff.verifyManifest(root);
+  const untracked = git(['status', '--porcelain']).stdout.trim();
+  out(`finalized ${fwd(root)} — project brain ${state.instance} / ${processName}`);
+  out(`  pruned ${pruned.length} machine path(s) · kept ${ignored.length + instanceDirs.length} extension-owned path(s) untracked${instanceDirs.length ? ` (instance folders: ${instanceDirs.join(', ')})` : ''}`);
+  out(`  manifest: ${manifest.fileCount} file(s), sha256 each · commit ${sha} · verify: ${verify.ok ? 'CLEAN' : 'DRIFTED'}${untracked ? ` · untracked leftovers: ${untracked.split('\n').length}` : ''}`);
+  problems.forEach((p) => out(wrap(`  FORCED PAST: ${p}`, 2)));
+  if (state.terminal !== 'success') { out(`  FORCED — terminal was "${state.terminal || 'open'}", not "success" (${a.by}: ${a.reason}).`); }
+  out(`  Next: open this folder in your agent session; CLAUDE.md is the entry. Re-check integrity any time with: node -e "…" or by re-running finalize --check before the CLI was pruned.`);
+  return verify.ok ? EXIT_OK : EXIT_REJECTED;
+}
+
+function readWikiRoot(root) {
+  try { const cfg = JSON.parse(fs.readFileSync(path.join(root, 'product.config.json'), 'utf8').replace(/^﻿/, '')); return (cfg.paths && cfg.paths.wikiRoot) || 'docs/wiki'; } catch (e) { return 'docs/wiki'; }
 }
 
 /* ============================================================ isolate =========
@@ -1713,6 +2061,9 @@ const COMMANDS = {
   init: cmdInit,
   refine: cmdRefine,
   export: cmdExport,
+  'verify-export': cmdVerifyExport,
+  finalize: cmdFinalize,
+  'skills-audit': cmdSkillsAudit,
   isolate: cmdIsolate,
   next: cmdNext,
   ingest: cmdIngest,

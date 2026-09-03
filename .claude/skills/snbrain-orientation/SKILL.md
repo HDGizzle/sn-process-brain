@@ -91,6 +91,15 @@ its own span. Run pilot-run-8: two of five items in one such list were not lifte
 decision was ever minted for them, and the finished brain could not answer about them —
 a gap the exam attributed to the brain until the transcript showed it was the presenter's.
 
+**One answer, one decision — or its atoms, never both.** An answer may legitimately enter
+as a `prior-decisions` convention AND as lifted recall topics ("flow designer is
+deliberate, decision tables too" is one sentence and two atoms). The CLI collapses them by
+source answer at ingest: the atoms are minted, inherit the convention's witness claim and
+record `splitFrom`; the umbrella's decision is suppressed (its stated convention and claim
+stay, for conventions.md and the gates). You do not need to avoid the overlap — record the
+sentence where it belongs and lift the atoms — but do not paraphrase an atom into a
+different sentence to "make it distinct": the collapse is by verbatim containment.
+
 ### Step 2 — the boundary read-back and the conventions
 
 Read `boundaryAsStated` back to the human in their words, not as a predicate. Census has

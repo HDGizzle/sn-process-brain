@@ -71,6 +71,63 @@ const PRESETS = {
   claude: ['claude', '-p', '{prompt}', '--dangerously-skip-permissions', '--output-format', 'json', '--model', '{model}'],
 };
 
+/*
+ * THE RUNNER CONTRACT (F1, 2026-09-02). Stage orchestration is separated from runner
+ * TRANSPORT. A runner is anything that can take one stage request —
+ *
+ *   { brief: { text, file, stage, iteration }, root, model, toolPolicy: { readOnly: true,
+ *     allowlist: 'tools/snbrain/lib/api.js' }, prompt }
+ *
+ * — and return one normalised result —
+ *
+ *   { status: 'ok' | 'failed' | 'unavailable', exit, output, usage, error, seconds }
+ *
+ * with FRESH CONTEXT per request. The CLI adapter below achieves fresh context by process
+ * isolation (one `copilot -p` / `codex exec` / `claude -p` per stage). That coupling is what
+ * the second engagement hit: a company-managed laptop with Copilot Chat authenticated in VS
+ * Code and no permission to install the standalone CLI could not run a single stage. The
+ * contract lets a VS Code-native adapter (Language Model API extension, one fresh chat request
+ * per stage, tool policy enforced by the adapter) implement the same request/result without a
+ * process boundary — designed in docs/design.md, not built yet; `detectRunners` names it as
+ * "not yet available" so the option is visible before any spend.
+ */
+const RUNNER_KINDS = Object.freeze({ cli: 'one OS process per stage (spawnSync); fresh context by process isolation', vscode: 'VS Code Language Model API adapter — one fresh chat request per stage (designed, not yet available)' });
+
+/** Every runner this driver knows, with availability, before anything is spent. */
+function detectRunners(config) {
+  const table = Object.assign({}, PRESETS, (config && config.runners) || {});
+  const which = (exe) => {
+    const r = spawnSync(process.platform === 'win32' ? 'where' : 'which', [exe], { encoding: 'utf8', windowsHide: true });
+    const found = r.status === 0 ? String(r.stdout || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0] : null;
+    return found || null;
+  };
+  const out = Object.keys(table).map((name) => {
+    const argv = table[name];
+    const exe = Array.isArray(argv) && argv.length ? String(argv[0]) : null;
+    const resolved = exe ? which(exe) : null;
+    return { name, kind: 'cli', executable: exe, available: !!resolved, resolvedPath: resolved };
+  });
+  out.push({ name: 'vscode', kind: 'vscode', executable: null, available: false, resolvedPath: null, note: RUNNER_KINDS.vscode });
+  return out;
+}
+
+/** The sentence a missing runner gets, with every option a person actually has. */
+function describeUnavailable(name, detected) {
+  const others = detected.filter((r) => r.available && r.name !== name).map((r) => r.name);
+  return `runner "${name}" is not on PATH${detected.some((r) => r.name === name && r.kind === 'cli') ? ` (executable "${(detected.find((r) => r.name === name) || {}).executable}")` : ''}. ` +
+    'Nothing was spent. Options: (1) install that CLI and sign in; (2) use another runner that is on this machine' +
+    `${others.length ? `: ${others.join(', ')}` : ' — none detected'}; (3) the VS Code adapter (Copilot Chat already authenticated in the editor, no standalone CLI) — designed in docs/design.md, not yet available.`;
+}
+
+/** Run one stage through a runner. Only the CLI kind exists; the shape is the contract. */
+function runStage(runner, req, opts) {
+  if (runner.kind === 'vscode') {
+    return { status: 'unavailable', exit: null, output: '', usage: null, error: RUNNER_KINDS.vscode, seconds: 0 };
+  }
+  const res = spawnWorker(runner.argv, { prompt: req.prompt, brief: req.brief.file, root: req.root, model: req.model }, { cwd: req.root, outFile: opts && opts.outFile });
+  return { status: res.error ? 'unavailable' : (res.code === 0 ? 'ok' : 'failed'), exit: res.code, output: '', usage: res.usage, error: res.error, seconds: res.seconds, stdoutBytes: res.stdoutBytes };
+}
+
 /** Substitute placeholders; drop a `{model}` arg (and the flag before it) when no model is set. */
 function buildArgs(argv, subst) {
   const out = [];
@@ -147,6 +204,7 @@ function usage() {
     '                                     [--max-spawns <n>] [--gates pause|spawn] [--config <file>]',
     '  node tools/snbrain/drive.js once    --runner <name> [same flags]   one spawn, then stop',
     '  node tools/snbrain/drive.js dry-run [--root <dir>]                 brief sizes, no spawn',
+    '  node tools/snbrain/drive.js doctor  [--root <dir>]                 which runners are on PATH, before any spend',
     '',
     `runners (presets): ${Object.keys(PRESETS).join(', ')} — override or add in drive.config.json`,
     'exit: 0 done · 1 work remains · 2 usage · 3 terminal non-success · 4 stopped at a human gate',
@@ -301,7 +359,9 @@ function iterate(root, runnerArgv, opts) {
   fs.mkdirSync(outDir, { recursive: true });
   const outFile = path.join(outDir, `${b.stage}-${String(b.iteration).padStart(2, '0')}.out`);
   if (model) { out(`model ${model}`); }
-  const res = spawnWorker(runnerArgv, { prompt, brief: fwd(files.txt), root: fwd(root), model }, { cwd: root, outFile });
+  const res = runStage({ name: runnerArgv[0], kind: 'cli', argv: runnerArgv },
+    { prompt, brief: { text, file: fwd(files.txt), stage: b.stage, iteration: b.iteration }, root: fwd(root), model, toolPolicy: { readOnly: true, allowlist: 'tools/snbrain/lib/api.js' } },
+    { outFile });
   const after = stageIterations(root, b.stage);
 
   let reconciled = null;
@@ -319,13 +379,13 @@ function iterate(root, runnerArgv, opts) {
 
   const entry = {
     event: 'spawn', stage: b.stage, iteration: b.iteration, briefBytes: bytes, promptBytes: Buffer.byteLength(prompt, 'utf8'),
-    runner: runnerArgv[0], model, exit: res.code, error: res.error, seconds: res.seconds,
+    runner: runnerArgv[0], runnerKind: 'cli', model, exit: res.exit, status: res.status, error: res.error, seconds: res.seconds,
     usage: res.usage, stdoutBytes: res.stdoutBytes,
     recordedIteration: recorded || !!(reconciled && reconciled.accepted), cursorMovedTo: moved ? after.stage : (reconciled && reconciled.nextStage !== b.stage ? reconciled.nextStage : null), reconciled,
   };
   appendLog(root, entry);
   const u = res.usage;
-  out(`worker exit ${res.code} after ${res.seconds}s · iteration recorded: ${entry.recordedIteration}${entry.cursorMovedTo ? ` · cursor -> ${entry.cursorMovedTo}` : ''}` +
+  out(`worker exit ${res.exit} after ${res.seconds}s · iteration recorded: ${entry.recordedIteration}${entry.cursorMovedTo ? ` · cursor -> ${entry.cursorMovedTo}` : ''}` +
     (u ? ` · usage in ${u.input} / cacheW ${u.cacheWrite} / cacheR ${u.cacheRead} / out ${u.output}${u.costUsd != null ? ` / $${Number(u.costUsd).toFixed(2)}` : ''}${u.turns != null ? ` / ${u.turns} turns` : ''}` : ' · usage: not reported by this runner (read credits off its dashboard)'));
 
   if (res.error) { err(`could not start runner "${runnerArgv[0]}": ${res.error}. Fix the preset in drive.config.json.`); return { stop: EXIT_USAGE }; }
@@ -405,6 +465,14 @@ function cmdRun(a, onceOnly) {
   if (!runnerName) { err('run requires --runner <copilot|codex|claude|custom> (or defaultRunner in drive.config.json).'); return EXIT_USAGE; }
   const runnerArgv = resolveRunner(runnerName, config);
   if (!runnerArgv) { err(`unknown runner "${runnerName}". Presets: ${Object.keys(PRESETS).join(', ')}; add "${runnerName}" under runners in drive.config.json as an argv array.`); return EXIT_USAGE; }
+  /*
+   * F1: CAPABILITY DETECTION BEFORE SPEND. The second engagement learned the standalone CLI
+   * was required here — after bootstrap, after the transport connected — from a launcher
+   * prompt to install it. The driver now refuses with the options before the first brief.
+   */
+  const detected = detectRunners(config);
+  const chosen = detected.find((r) => r.name === runnerName);
+  if (!chosen || !chosen.available) { err(describeUnavailable(runnerName, detected)); appendLog(root, { event: 'runner-unavailable', runner: runnerName, detected }); return EXIT_USAGE; }
   const maxSpawns = onceOnly ? 1 : Number(a['max-spawns'] || config.maxSpawns || 60);
   const gates = (a.gates && a.gates !== true) ? String(a.gates) : (config.gates || 'pause');
   const modelOverride = (a.model && a.model !== true) ? String(a.model) : null;
@@ -434,9 +502,16 @@ function main(argv) {
     case 'run': return cmdRun(a, false);
     case 'once': return cmdRun(a, true);
     case 'dry-run': return cmdDryRun(a);
+    case 'doctor': {
+      const root = path.resolve(a.root === undefined || a.root === true ? process.cwd() : a.root);
+      const detected = detectRunners(loadConfig(root, a.config && a.config !== true ? path.resolve(a.config) : null));
+      out('runners (the contract: brief + stage metadata + root + model + tool policy -> {status, output, usage, error}):');
+      for (const r of detected) { out(`  ${r.available ? 'ok      ' : 'MISSING '} ${r.name.padEnd(10)} ${r.kind === 'cli' ? `${r.executable}${r.resolvedPath ? ` -> ${fwd(r.resolvedPath)}` : ''}` : r.note}`); }
+      return detected.some((r) => r.available) ? EXIT_OK : EXIT_USAGE;
+    }
     default: err(`unknown command "${cmd}"\n\n${usage()}`); return EXIT_USAGE;
   }
 }
 
 if (require.main === module) { process.exit(main(process.argv.slice(2))); }
-module.exports = { PRESETS, resolveRunner, workerPrompt, estTokens, buildArgs, modelFor, parseUsage };
+module.exports = { PRESETS, RUNNER_KINDS, resolveRunner, workerPrompt, estTokens, buildArgs, modelFor, parseUsage, detectRunners, describeUnavailable, runStage, loadConfig };

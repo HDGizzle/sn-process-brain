@@ -1250,6 +1250,104 @@ function writeDecisionLedger(repoRoot, opts) {
 }
 
 // ---------------------------------------------------------------------------
+// --glossary : the controlled vocabulary, generated from the confirmed decisions
+// ---------------------------------------------------------------------------
+
+/*
+ * F6 (2026-09-02). The interview confirms definitions; the wiki's own rule says glossary.md
+ * is the single source for project terminology; and the second engagement shipped that page
+ * as the empty scaffold — blank table rows, unfilled verification date — while the kernel
+ * carried the definitions. Nothing generated the page. This does, from lib/vocabulary.js,
+ * the same model the kernel section projects, so the two cannot disagree.
+ *
+ * A term row cites its DEC number, the human and date, and the anchor claims; the status
+ * banner is computed from those claims like every other page. Recurring tokens no human
+ * defined are listed as gaps, by name — the honest half of a glossary is what it does not
+ * define yet.
+ */
+function buildGlossaryPage(repoRoot, opts) {
+  const o = opts || {};
+  const wiki = (o.wiki || 'docs/wiki').replace(/\/+$/, '');
+  const { buildVocabularyModel } = require('./lib/vocabulary.js');   // lazy: vocabulary.js requires this file
+  const model = buildVocabularyModel(repoRoot);
+  const claimIds = new Set();
+  const rows = [];
+  for (const t of model.terms) {
+    const anchors = t.witnessClaims.concat(t.explainsClaims).filter((id) => model.claimsById.has(id));
+    for (const id of anchors) { claimIds.add(id); }
+    const ctx = [
+      `[${t.decisionNum}](decisions.md)`,
+      t.answeredBy ? `confirmed by ${t.answeredBy}${t.answeredAt ? ` on ${t.answeredAt}` : ''}` : null,
+      anchors.length ? `anchors ${anchors.map((id) => code(id)).join(', ')}` : 'linkage: unbound — no anchoring claim',
+      t.aliases.length ? `also written: ${t.aliases.map((a) => esc(a)).join(', ')}` : null,
+      t.needsReconfirmation ? '**NEEDS RECONFIRMATION** — a witnessing claim drifted' : null,
+    ].filter(Boolean).join(' · ');
+    rows.push(`| **${esc(t.canonicalTerm)}** | ${esc(t.definition)} | ${ctx} |`);
+  }
+  const rendered = new Date().toISOString().slice(0, 10);
+  const status = claimIds.size ? pageStatus([...claimIds], model.claimsById) : 'draft';
+  const lines = [
+    '---',
+    'title: "Glossary — controlled vocabulary"',
+    `status: "${status}"`,
+    `claims-rendered: ${claimIds.size}`,
+    `last-verified: ${rendered} (rendered from .brain/decisions.jsonl; instance-verified where the anchor claims are)`,
+    `mentions: [${model.terms.map((t) => esc(t.canonicalTerm)).join(', ')}]`,
+    '---',
+    '',
+    '# Glossary — controlled vocabulary',
+    '',
+    '> Verify sys_ids/states against the live instance before use.',
+    '',
+    'Single source for project terminology. Use these terms exactly, everywhere. Generated from the',
+    'decision ledger — never edited by hand: a definition enters through the interview (a human, named,',
+    'dated) and reaches this page and the kernel from the same record. A term with no row here has no',
+    'confirmed meaning; write it out and do not guess an expansion.',
+    '',
+    '## Domain — defined by the customer',
+    '',
+  ];
+  if (rows.length) {
+    lines.push('| Term | Meaning | Context |', '|---|---|---|', ...rows, '');
+  } else {
+    lines.push(`No vocabulary was confirmed at the interview of run ${model.terms.length === 0 && o.runId ? o.runId : 'this brain'}: no register-gap question was answered with a definition. The gaps below are the words to ask about first.`, '');
+  }
+  if (model.superseded.length) {
+    lines.push('Superseded rows (a later decision redefined the term): ' + model.superseded.map((t) => `${t.decisionNum} (${esc(t.canonicalTerm)})`).join(', ') + '.', '');
+  }
+  lines.push('## Terms the ledger surfaces that no decision explains', '');
+  if (model.unmatched.length) {
+    lines.push('Recurring in customer-authored record names (count = distinct records); ask, do not guess:', '');
+    for (const v of model.unmatched.slice(0, 40)) {
+      lines.push(`- *${esc(v.display)}* (${v.loci} records${v.looksLikeAcronym ? ', looks like an acronym' : ''}) — no recorded decision defines it.`);
+    }
+    if (model.unmatched.length > 40) { lines.push(`- … and ${model.unmatched.length - 40} more recurring token(s).`); }
+  } else {
+    lines.push('None: every recurring token in the customer-authored surface has a confirmed definition above.');
+  }
+  lines.push('');
+  return {
+    page: { path: `${wiki}/glossary.md`, body: `${lines.join('\n')}\n`, claimIds: [...claimIds], status },
+    rejections: model.unresolvable.length
+      ? [`${model.unresolvable.length} vocabulary decision(s) carry no canonical term and cannot be keyed to a glossary row: ` +
+        `${model.unresolvable.map((u) => `${u.num} (${u.id})`).join(', ')}. A definition with no term is a paragraph, not a glossary entry — ` +
+        're-answer the question with `canonicalTerm`, or fix the question text so the word it asks about is quoted.']
+      : [],
+    totals: { terms: model.terms.length, unmatched: model.unmatched.length, superseded: model.superseded.length, unresolvable: model.unresolvable.length, anchors: claimIds.size },
+  };
+}
+
+function writeGlossaryPage(repoRoot, opts) {
+  const built = buildGlossaryPage(repoRoot, opts);
+  if (built.rejections.length) { return built; }
+  const abs = path.resolve(repoRoot, built.page.path);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, built.page.body, 'utf8');
+  built.written = true;
+  return built;
+}
+
+// ---------------------------------------------------------------------------
 // --check : audit a rendered wiki against the contract
 // ---------------------------------------------------------------------------
 
@@ -1428,6 +1526,7 @@ module.exports = {
   CONVENTION_LOGIC_TABLES, CONVENTION_COMPLIANCE_FLOOR, CONVENTION_MIN_CLASS, conventionPatternRegex,
   instanceMentions, INSTANCE_CLAIM_FLOOR, PLATFORM_HOSTS,
   buildSourceAppendix, writeSourceAppendix, fenceFor,
+  buildGlossaryPage, writeGlossaryPage,
   DECISION_TIERS, decisionTier, decisionAnchors,
   esc, code, trunc, artifactTable, pageStatus, checkWiki,
 };
@@ -1466,6 +1565,21 @@ if (require.main === module) {
     '                         into .claude/settings.json, and the enforcement block in',
     '                         <wiki>/conventions.md — enforcement: none lines included.',
     '                         [--wiki <rel>] [--dry-run]',
+    '  --scaffold [--force]   instantiate wiki-scaffold/ into <wiki>: verification dates from run',
+    '                         metadata, DELETE-ME rows and dummy ids dropped from live pages, the',
+    '                         story template parameterised from naming.storySetFormat',
+    '  --index                generate <wiki>/index.md from the pages on disk + the run record',
+    '  --interview            generate <wiki>/INTERVIEW.md from the questions ledger (answered/open/shadow)',
+    '  --proof                generate <wiki>/evidence/read-only-proof.md and copy the request log +',
+    '                         closing capability snapshot to stable names (resolved from run state)',
+    '  --stories              one immutable page per seeded story/epic pointer and per induced story',
+    '                         root, paired to the anchor\'s update sets by shared work-item id or root;',
+    '                         splices the deployment-matrix rows. Unpaired sets are reported.',
+    '                         [--wiki <rel>] [--dry-run] [--emit-manifest <rel>]',
+    '  --glossary             generate <wiki>/glossary.md from the confirmed vocabulary decisions',
+    '                         (canonicalTerm + aliases, DEC number, anchors) and list the recurring',
+    '                         tokens nobody defined. Same model as the kernel section (lib/vocabulary.js).',
+    '                         [--wiki <rel>] [--dry-run] [--emit-manifest <rel>]',
     '  --kernel-facts         fill the kernel\'s ledger-fact slots in product.config.json from',
     '                         the claim ledger: {{ledger.instanceLine}} (the instance landscape,',
     '                         evidence-counted), {{vocabulary.section}} and {{orgMap.section}}',
@@ -1590,6 +1704,85 @@ if (require.main === module) {
       `  org map: ${t.orgClaims} group/membership claim(s)${t.orgClaims ? '' : ' — rendered as the declared gap, not silently absent'}\n` +
       `  instanceLine: ${built.facts.ledger.instanceLine}\n`);
     process.exit(0);
+  }
+
+  /*
+   * F7 / F8 / F12 (2026-09-02): the pages the render worker used to write by hand, now
+   * generated (lib/pages.js). Each emits its manifest fragment so pages[] is derived, never
+   * retyped. `--scaffold` instantiates the wiki scaffold with run metadata filled and the
+   * example rows dropped from live pages; it never overwrites an existing page without --force.
+   */
+  const pagesLib = require('./lib/pages.js');
+  const emitFragment = (entries, emitTo) => {
+    if (!emitTo) { return; }
+    const abs = path.resolve(root, emitTo);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, `${JSON.stringify({ pages: entries }, null, 1)}\n`, 'utf8');
+    process.stdout.write(`  manifest fragment for render.json pages[]: ${emitTo} (${entries.length} entries)\n`);
+  };
+  const pageEntry = (p, tier) => ({ path: p.path, status: p.status, rendersClaims: p.claimIds, tier });
+
+  if (argv.includes('--scaffold')) {
+    const r = pagesLib.scaffoldWiki(root, { wiki: arg('--wiki', configuredWiki), force: argv.includes('--force') });
+    process.stdout.write(`render --scaffold: ${r.written.length} page(s) instantiated under ${r.wiki} (dated ${r.date}), ` +
+      `${r.skipped.length} already present and kept${argv.includes('--force') ? '' : ' (--force re-instantiates them)'}` +
+      `${r.kept.length ? `, ${r.kept.length} GENERATED page(s) kept even under --force: ${r.kept.slice(0, 4).join(', ')}${r.kept.length > 4 ? ', …' : ''}` : ''}\n`);
+    process.exit(0);
+  }
+  if (argv.includes('--index')) {
+    const built = pagesLib.buildIndexPage(root, { wiki: arg('--wiki', configuredWiki) });
+    if (!argv.includes('--dry-run')) { pagesLib.writePage(root, built); }
+    process.stdout.write(`render --index: ${built.written ? 'wrote' : 'would write'} ${built.page.path}\n`);
+    emitFragment([pageEntry(built.page, 'index')], arg('--emit-manifest', null));
+    process.exit(0);
+  }
+  if (argv.includes('--interview')) {
+    const built = pagesLib.buildInterviewPage(root, { wiki: arg('--wiki', configuredWiki) });
+    if (!argv.includes('--dry-run')) { pagesLib.writePage(root, built); }
+    const t = built.totals;
+    process.stdout.write(`render --interview: ${built.written ? 'wrote' : 'would write'} ${built.page.path} — ${t.answered} answered, ${t.queued} open, ${t.deferred} deferred, ${t.shadow} shadow\n`);
+    emitFragment([pageEntry(built.page, 'ledger')], arg('--emit-manifest', null));
+    process.exit(0);
+  }
+  if (argv.includes('--proof')) {
+    const built = argv.includes('--dry-run') ? pagesLib.buildReadOnlyProof(root, { wiki: arg('--wiki', configuredWiki) }) : pagesLib.writeReadOnlyProof(root, { wiki: arg('--wiki', configuredWiki) });
+    if (built.rejections.length) {
+      process.stdout.write('render --proof: REFUSED —\n');
+      for (const r of built.rejections) { process.stdout.write(`  - ${r}\n`); }
+      process.exit(1);
+    }
+    const t = built.totals;
+    process.stdout.write(`render --proof: ${built.written ? 'wrote' : 'would write'} ${built.page.path} — ${t.calls} call(s), ${t.commands} command(s), ${t.writeShaped} write-shaped; ${built.copies.length} artifact(s) copied to stable names\n`);
+    emitFragment([pageEntry(built.page, 'evidence')], arg('--emit-manifest', null));
+    process.exit(0);
+  }
+  if (argv.includes('--stories')) {
+    const built = argv.includes('--dry-run') ? pagesLib.buildStoryPages(root, { wiki: arg('--wiki', configuredWiki) }) : pagesLib.writeStoryPages(root, { wiki: arg('--wiki', configuredWiki) });
+    const t = built.totals;
+    process.stdout.write(`render --stories: ${built.written ? 'wrote' : 'would write'} ${t.stories} story page(s) from ${t.pointers} seed pointer(s) and ${t.sets} resolved set(s); ${t.unpaired} set(s) pair to no story${built.matrixPath ? `; matrix rows spliced into ${built.matrixPath}` : ''}\n`);
+    for (const s of built.stories) { process.stdout.write(`  ${s.path}: ${s.sets.length} set(s), ${s.claims} claim(s) — ${s.title}\n`); }
+    for (const u of built.unpaired) { process.stdout.write(`  UNPAIRED ${u.name} (${u.members} members) — a finding at ingest\n`); }
+    emitFragment(built.pages.map((p) => pageEntry(p, 'story')), arg('--emit-manifest', null));
+    process.exit(0);
+  }
+
+  if (argv.includes('--glossary')) {
+    const opts = { wiki: arg('--wiki', configuredWiki) };
+    const built = argv.includes('--dry-run') ? buildGlossaryPage(root, opts) : writeGlossaryPage(root, opts);
+    const t = built.totals;
+    process.stdout.write(
+      `render --glossary: ${built.written ? 'wrote' : argv.includes('--dry-run') ? 'would write' : 'REFUSED to write'} ${built.page.path}\n` +
+      `  ${t.terms} confirmed term(s) citing ${t.anchors} anchor claim(s) · ${t.unmatched} recurring token(s) with no definition · ${t.superseded} superseded · ${t.unresolvable} unkeyable\n`);
+    for (const r of built.rejections) { process.stdout.write(`  - ${r}\n`); }
+    const emitTo = arg('--emit-manifest', null);
+    if (emitTo && !built.rejections.length) {
+      const entry = { path: built.page.path, status: built.page.status, rendersClaims: built.page.claimIds, tier: 'reference' };
+      const abs = path.resolve(root, emitTo);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, `${JSON.stringify({ pages: [entry] }, null, 1)}\n`, 'utf8');
+      process.stdout.write(`  manifest fragment for render.json pages[]: ${emitTo} (1 entry)\n`);
+    }
+    process.exit(built.rejections.length ? 1 : 0);
   }
 
   if (argv.includes('--deliverable-check')) {
