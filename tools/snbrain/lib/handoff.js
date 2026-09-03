@@ -140,15 +140,29 @@ function fileTable(root, relFiles) {
   });
 }
 
-/** Everything under a directory except .git and the manifest itself. */
-function treeFiles(root) {
+/**
+ * Everything under a directory except .git, the manifest itself, and anything the caller
+ * declares ignored.
+ *
+ * `ignored` is not cosmetic. `finalize` KEEPS extension-owned paths on disk (.vscode, the
+ * sn-scriptsync instance folders, agentrules/, spikes/) and deliberately leaves them out of
+ * the manifest, because they are not the deliverable and they change under the operator's
+ * feet. Measured on the first finalize against a real engagement folder: the manifest listed
+ * 169 files, the verifier walked the whole tree, and `finalize --check` reported the
+ * deliverable DRIFTED the moment it was created — an integrity check that cries wolf on its
+ * own output teaches the operator to ignore it. The verifier reads the ignore list the
+ * manifest carries.
+ */
+function treeFiles(root, ignored) {
+  const skip = new Set((ignored || []).map(fwd));
   const out = [];
   const walk = (dir) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       if (e.name === '.git') { continue; }
       const p = path.join(dir, e.name);
-      if (e.isDirectory()) { walk(p); continue; }
       const rel = fwd(path.relative(root, p));
+      if (skip.has(rel)) { continue; }
+      if (e.isDirectory()) { walk(p); continue; }
       if (rel === MANIFEST_NAME) { continue; }
       out.push(rel);
     }
@@ -172,7 +186,7 @@ function verifyManifest(dir) {
   const listed = Array.isArray(manifest.files) ? manifest.files : null;
   if (!listed) { return { ok: false, error: `${MANIFEST_NAME} carries no per-file list (files: ${JSON.stringify(manifest.files)}) — an older manifest; regenerate with export or finalize`, added: [], deleted: [], modified: [], manifest }; }
   const byPath = new Map(listed.map((f) => [fwd(f.path), f]));
-  const present = treeFiles(dir);
+  const present = treeFiles(dir, manifest.ignored);
   const presentSet = new Set(present);
   const added = present.filter((p) => !byPath.has(p));
   const deleted = [...byPath.keys()].filter((p) => !presentSet.has(p));

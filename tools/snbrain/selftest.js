@@ -7187,6 +7187,21 @@ test('F12: the read-only proof is resolved from run state at a non-default path 
   assertIncludes(r.stderr, 'read-only-proof.md', 'the refusal does not name the missing proof');
 });
 
+test('a FORCED export does not report its own banner as a hand-edited mirror', () => {
+  /*
+   * Measured while building the A/B on pilot-run-8's ledger: --force stamps the
+   * NOT-FIT-FOR-HANDOFF banner onto CLAUDE.md alone, and the mirror comparison then declared
+   * both mirrors hand-edited — a check crying wolf exactly when the operator is already being
+   * told the export is unfit.
+   */
+  const { root } = exportFixture('force-banner', null);
+  const to = path.join(SCRATCH, 'out-force-banner');
+  const r = cli(['export', '--to', to, '--root', root, '--force', '--by', 'a named operator', '--reason', 'showing a partial repo']);
+  assertEqual(r.code, 0, `forced export failed:\n${r.stdout}${r.stderr}`);
+  assertIncludes(fs.readFileSync(path.join(to, 'CLAUDE.md'), 'utf8'), 'NOT FIT FOR HANDOFF', 'the banner was not stamped');
+  assertEqual(/FORCED PAST: kernel mirror/.test(r.stdout), false, `the banner was reported as mirror drift:\n${r.stdout}`);
+});
+
 test('F13: the export manifest hashes every file and names the three mirrors; verify-export fails on any drift', () => {
   const { root } = exportFixture('f13-manifest');
   const to = path.join(SCRATCH, 'out-f13');
@@ -7328,6 +7343,35 @@ test('finalize: prunes the machine in place, writes the hashed manifest, restart
   const c = cli(['finalize', '--check', '--root', root]);
   assertEqual(c.code, 1, 'an edited page verified clean');
   assertIncludes(c.stdout, 'modified: docs/wiki/index.md');
+});
+
+test('finalize: the extension-owned paths it keeps do not make its own manifest report drift', () => {
+  /*
+   * Measured on the first finalize against a real engagement folder (the A/B's B-work, 2026-09-03):
+   * finalize keeps .vscode, spikes/ and the sn-scriptsync instance folders on disk and leaves them
+   * out of the manifest, the verifier walked the whole tree, and `--check` said DRIFTED the moment
+   * the deliverable was created. An integrity check that cries wolf on its own output is one the
+   * operator learns to ignore, which is worse than not having it.
+   */
+  const { root } = exportFixture('fin-ignored');
+  brainWithLog(root);
+  putFile(root, '.vscode/sn-agent-port.json', '{"port":1}');
+  putFile(root, 'spikes/scriptsync-read/notes.md', 'operating scratch');
+  putFile(root, 'acmedev/_settings.json', '{"instance":"acmedev"}');
+  gitCommitAll(root, 'operating state');
+  const r = cli(['finalize', '--by', 'a named operator', '--root', root]);
+  assertEqual(r.code, 0, `finalize failed:\n${r.stdout}${r.stderr}`);
+  assertIncludes(r.stdout, 'verify: CLEAN', `finalize reported drift on the tree it just wrote:\n${r.stdout}`);
+  assertEqual(cli(['finalize', '--check', '--root', root]).code, 0, 'the freshly finalized tree does not verify clean');
+  for (const kept of ['.vscode/sn-agent-port.json', 'spikes/scriptsync-read/notes.md', 'acmedev/_settings.json']) {
+    assert(fs.existsSync(path.join(root, kept)), `finalize deleted an extension-owned path: ${kept}`);
+  }
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'EXPORT-MANIFEST.json'), 'utf8'));
+  assert(!manifest.files.some((f) => /^(\.vscode|spikes|acmedev)\//.test(f.path)), 'an extension-owned path entered the manifest');
+  assert((manifest.ignored || []).length >= 3, 'the manifest does not declare what it ignored, so no verifier can agree with it');
+  // And a real edit inside the deliverable is still caught.
+  fs.appendFileSync(path.join(root, 'docs', 'wiki', 'index.md'), '\nedited\n');
+  assertEqual(cli(['finalize', '--check', '--root', root]).code, 1, 'an edit to a deliverable page was not caught');
 });
 
 test('finalize: refuses below terminal success unless forced, and refuses unknown files', () => {

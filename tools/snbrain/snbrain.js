@@ -1414,11 +1414,19 @@ function handoffProblems(root, opts) {
   if (fs.existsSync(path.join(root, 'CLAUDE.md'))) {
     const routes = handoff.kernelRouteProblems(root, 'CLAUDE.md');
     if (routes.length) { problems.push(`${routes.length} kernel route(s) resolve to nothing in the handed-over tree: ${routes.slice(0, 4).join('; ')}${routes.length > 4 ? '; …' : ''}`); }
+    /*
+     * MEASURED WHILE BUILDING THE A/B (2026-09-03): a FORCED export stamps the
+     * NOT-FIT-FOR-HANDOFF banner onto CLAUDE.md alone, so comparing the raw bytes reported all
+     * three mirrors as hand-edited on every forced export — a check crying wolf at exactly the
+     * moment the operator is already being told something is wrong. The banner is a leading
+     * blockquote; strip one from either side before comparing, and the check goes back to
+     * meaning what it says.
+     */
+    const stripBanner = (t) => t.replace(/\r\n/g, '\n').replace(/^(?:>[^\n]*\n)+\s*/, '');
     for (const mirror of ['.github/copilot-instructions.md', 'AGENTS.md']) {
       const abs = path.join(root, mirror);
       if (!fs.existsSync(abs)) { problems.push(`kernel mirror ${mirror} is missing — render-kernel.js writes all three; re-run it`); continue; }
-      const norm = (t) => t.replace(/\r\n/g, '\n').replace(/^> \[!WARNING\][\s\S]*?\n\n\n/, '');
-      if (norm(fs.readFileSync(abs, 'utf8')) !== norm(fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8'))) { problems.push(`kernel mirror ${mirror} differs from CLAUDE.md — a hand edit of a rendered kernel; re-run node tools/render-kernel.js`); }
+      if (stripBanner(fs.readFileSync(abs, 'utf8')) !== stripBanner(fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8'))) { problems.push(`kernel mirror ${mirror} differs from CLAUDE.md — a hand edit of a rendered kernel; re-run node tools/render-kernel.js`); }
     }
   } else { problems.push('CLAUDE.md is missing — there is no kernel to hand over'); }
   const proof = path.join(root, wiki, 'evidence', 'read-only-proof.md');
@@ -1808,7 +1816,7 @@ function cmdFinalize(a) {
 
   // 6. The manifest over what remains (minus the ignored, extension-owned paths).
   const ignoreSet = new Set(ignored.concat(instanceDirs));
-  const remaining = handoff.treeFiles(root).filter((rel) => !ignoreSet.has(rel.split('/')[0]) && !ignoreSet.has(rel));
+  const remaining = handoff.treeFiles(root, [...ignoreSet]);
   const manifest = buildManifest(root, remaining, {
     verb: 'finalize', engineSchema: state.version || null,
     finalizedAt: new Date().toISOString(), finalizedBy: a.by,
