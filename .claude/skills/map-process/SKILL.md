@@ -111,6 +111,23 @@ Read-only throughout; every read goes through `tools/snbrain/lib/api.js`. Field-
 before every filtered query. An empty read is not an absence without a same-session
 canary. Partial is a result. The CLI keeps the arithmetic and the ids.
 
+## Record what the loop gets wrong, as it happens
+
+```bash
+node tools/snbrain/snbrain.js quirk --note "<what happened>" [--severity blocker|friction|confusing|idea]
+```
+
+Findings about the INSTANCE go in the wiki and gate the run. Findings about **this
+product** go here and gate nothing: a brief that contradicted the CLI, a rejection the
+brief gave you no way to satisfy, a verb that does not exist, a capability the machine
+lacks. One line, at the moment it bites — afterwards nobody remembers.
+
+At the end, `snbrain quirks --report` writes `FINDINGS.md`: the recorded quirks, plus what
+the run already knows without being told (rejections per stage, raised bounds, spend
+disagreements) and **whether each wiki page carries what its evidence supports**. `finalize`
+writes it for you and leaves it untracked, outside the deliverable. Tell the developer to
+send it to whoever maintains this loop, and that it is not scrubbed of their own strings.
+
 ## Skill-routing note
 
 The developer's own words ("update set", "business rule", "notification") will trigger

@@ -267,6 +267,41 @@ routable. `render.validate` runs it on the operating tree; `export` and `finaliz
 on the tree that ships; `EXPORT-MANIFEST.json` lists every file with its sha256 and
 `verify-export` / `finalize --check` fail on any add, delete or modify.
 
+### The product's own feedback loop — `FINDINGS.md` (built 2026-09-04)
+
+The second engagement produced its thirteen findings because a human was asked to keep a log.
+That is now a run artifact: `lib/quirks.js`, `snbrain quirk`, `snbrain quirks --report`.
+
+Two populations, one report, and the split is the design. Findings about the INSTANCE live in
+`.brain/findings.jsonl`, are rendered into the wiki, and a blocking one stops terminal success.
+Findings about the PRODUCT live in `.brain/quirks.jsonl`, gate nothing, are pruned out of the
+deliverable, and are handed to whoever maintains the loop. Mixing them would gate a run on the
+tool's defects and bury the tool's defects inside a gate nobody reads afterwards.
+
+The report has two halves. **Execution quirks** are mostly derived from what a run already
+writes down — every rejection is the CLI telling a worker it did the wrong thing, and a cluster
+of them is a product defect wearing a stage's clothes — plus anything logged with `quirk` at
+the moment it bit, which is the only time anyone remembers. **Completeness** counts what each
+wiki tier owns against what its page carries: replayed on pilot-run-8, the registry carries 35
+of the 212 artifact identities in its own ledger, and the story tier 2 of 8. Those are counts,
+not opinions, which is what makes them arguable.
+
+It reports and never blocks. A gate on fullness is satisfied most cheaply by padding, and that
+makes the deliverable worse — the same reasoning that made the render-quality signals findings
+rather than rejections.
+
+### Open — is a page any GOOD, not merely full (kept on the radar, 2026-09-04)
+
+Fullness is countable and now counted. Usefulness is not, and `FINDINGS.md` says so where the
+measures end rather than implying its table is the whole answer. The judgement belongs to the
+**generated probe suite** already specified in this document: sample harvested records, ask
+"what does this do in the process", and require spine position, upstream cause, downstream
+dependents and decision provenance, each citing a claim. Two things to decide when it is built:
+it costs model spend per run, so it needs to be opt-in or sampled; and its result belongs in
+BOTH reports — the wiki (the customer's evidence that their brain answers) and FINDINGS.md
+(our evidence that the loop produces brains that answer). Until then the honest position is
+that a page can pass every count here and still be unreadable.
+
 ### Next build item — the VS Code-native runner adapter (F1)
 
 **The problem, measured.** `drive.js` models every runner as an executable plus arguments

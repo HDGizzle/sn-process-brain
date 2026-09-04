@@ -96,6 +96,14 @@ const HARD_RULES = Object.freeze([
 
   'YOU CANNOT DECIDE YOU ARE FINISHED. The CLI decides what runs next from the artifact you ' +
   'produce. Write the file, run the ingest command, and read what it tells you.',
+
+  'WHEN THE LOOP ITSELF GETS IN YOUR WAY, RECORD IT: node tools/snbrain/snbrain.js quirk --note ' +
+  '"<what happened>" [--severity blocker|friction|confusing|idea]. A brief that contradicts the CLI, ' +
+  'a rejection you cannot satisfy from what the brief told you, a command that does not exist, a ' +
+  'capability this machine lacks. It gates NOTHING and costs one line — it is feedback about the ' +
+  'PRODUCT, not a finding about the instance, and it goes to the people who maintain this loop. An ' +
+  'unrecorded quirk is one the next run repeats. Do not use it to argue with a rejection you should ' +
+  'simply fix.',
 ]);
 
 // ---------------------------------------------------------------------------

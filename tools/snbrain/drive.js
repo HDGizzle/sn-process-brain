@@ -325,6 +325,7 @@ function iterate(root, runnerArgv, opts) {
   }
   if (b.stage === 'done') {
     out(`All stages complete.${(b.blockers || []).length ? ` Blocking terminal success: ${b.blockers.join(' | ')}` : ' Run `snbrain finish --terminal success --by <name>`.'}`);
+    out('Then: `snbrain quirks --report` writes FINDINGS.md — what this run learned about the PRODUCT, including whether each wiki page carries what its evidence supports. Send it to whoever maintains the loop.');
     return { stop: (b.blockers || []).length ? EXIT_WORK_REMAINS : EXIT_OK };
   }
 
@@ -348,7 +349,13 @@ function iterate(root, runnerArgv, opts) {
       orientation: 'Zero API calls. Sealed recall first, verbatim; every topic span must be a character-for-character substring of a recorded answer.',
     };
     if (gateRules[b.stage]) { out(`Gate rule: ${gateRules[b.stage]}`); }
-    appendLog(root, { event: 'gate', stage: b.stage, iteration: b.iteration, briefBytes: bytes });
+    /*
+     * The gate is where a human is actually looking at the loop, which makes it the one moment
+     * they will report a quirk in. Asked at the end of a run, nobody remembers.
+     */
+    out('If anything about the loop itself got in the way, record it now — it gates nothing:');
+    out('  node tools/snbrain/snbrain.js quirk --note "<what happened>" [--severity blocker|friction|confusing|idea]');
+    appendLog(root, { event: 'gate', gate: true, stage: b.stage, iteration: b.iteration, briefBytes: bytes });
     return { stop: EXIT_GATE };
   }
 

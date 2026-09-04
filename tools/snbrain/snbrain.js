@@ -43,6 +43,8 @@ const { STAGE_BY_ID, STAGE_ORDER, HARD_RULES, ENVELOPE_SCHEMA, staleClaims, boun
 const deliverable = require('./lib/deliverable');
 /** F8/F11/F12/F13/D1 (2026-09-02). What must be true of a tree before it leaves this machine. */
 const handoff = require('./lib/handoff');
+/** 2026-09-04. Findings about the PRODUCT — the loop's own quirks, and whether it filled the wiki. */
+const quirks = require('./lib/quirks');
 
 const EXIT_OK = 0, EXIT_REJECTED = 1, EXIT_USAGE = 2, EXIT_TERMINAL = 3;
 
@@ -118,6 +120,14 @@ function usage() {
     `  node ${SELF} finalize  --by <name> [--root <dir>] [--force --reason <text>] [--prune-unknown] | --check`,
     '                             IN PLACE: prune the machine, regenerate the proof, run the handoff checks,',
     '                             write the hashed manifest, re-init git at "project brain <instance> / <process>"',
+    `  node ${SELF} quirk     --note "<what happened>" [--stage <s>] [--severity <s>] [--by <name>] [--evidence <path>]`,
+    '                             record a finding about THIS PRODUCT the moment it bites — a brief that',
+    '                             contradicted the CLI, a rejection you could not satisfy, a missing capability.',
+    '                             It gates nothing; the instance findings ledger is a different thing.',
+    `  node ${SELF} quirks    [--report] [--out <file>] [--json] [--root <dir>]`,
+    '                             list them, or write FINDINGS.md: the recorded quirks, the ones derived from',
+    '                             this run\'s own rejections/overrides/spend, and whether each wiki page carries',
+    '                             what its evidence supports. Send that file to whoever maintains the loop.',
     `  node ${SELF} skills-audit [--root <dir>] [--json]`,
     '                             every .claude/skills/*/SKILL.md must be routable (quoted trigger phrases) and',
     '                             reachable from the kernel; a failure is a BLOCKING finding',
@@ -1649,6 +1659,57 @@ function cmdExport(a) {
   return (dangling.length || !self.ok) ? EXIT_REJECTED : EXIT_OK;
 }
 
+/* ============================================================ quirk ===========
+ * FINDINGS ABOUT THE PRODUCT. `snbrain quirk` records one the moment it bites; `snbrain
+ * quirks --report` writes FINDINGS.md, which is what goes back to whoever maintains this
+ * loop. Deliberately NOT the findings ledger: that one is about the customer's instance and
+ * gates terminal success, and this one gates nothing. See lib/quirks.js.
+ */
+function cmdQuirk(a) {
+  const root = path.resolve(a.root && a.root !== true ? a.root : process.cwd());
+  if (!Brain.exists(root)) { err(`quirk: no brain at ${fwd(root)}. Record quirks from inside the engagement folder.`); return EXIT_USAGE; }
+  if (!a.note || a.note === true) {
+    err('quirk requires --note "<what happened, in your own words>".');
+    err(`  node ${SELF} quirk --note "the anchor excluded a set I named at seed" --stage anchor --severity blocker`);
+    err(`  severities: ${quirks.SEVERITIES.join(' | ')}`);
+    return EXIT_USAGE;
+  }
+  let row;
+  try {
+    row = quirks.recordQuirk(root, {
+      note: a.note,
+      stage: a.stage && a.stage !== true ? a.stage : Brain.open(root).state.stage,
+      kind: a.kind && a.kind !== true ? a.kind : 'observed',
+      severity: a.severity && a.severity !== true ? a.severity : 'friction',
+      by: a.by && a.by !== true ? a.by : null,
+      evidence: a.evidence && a.evidence !== true ? [a.evidence] : [],
+    });
+  } catch (e) { err(`quirk: ${e.message}`); return EXIT_USAGE; }
+  out(`recorded ${row.id} (${row.severity}${row.stage ? `, stage ${row.stage}` : ''}) — it gates nothing and travels to the product team in FINDINGS.md.`);
+  return EXIT_OK;
+}
+
+function cmdQuirks(a) {
+  const root = path.resolve(a.root && a.root !== true ? a.root : process.cwd());
+  if (!Brain.exists(root)) { err(`quirks: no brain at ${fwd(root)}.`); return EXIT_USAGE; }
+  if (a.report || a.out) {
+    const built = quirks.writeReport(root, a.out && a.out !== true ? a.out : 'FINDINGS.md');
+    out(`wrote ${built.path} — ${built.quirks.length} finding(s): ${Object.entries(built.counts).map(([k, v]) => `${v} ${k}`).join(', ') || 'none'}`);
+    for (const r of built.assessment.rows.filter((x) => x.expected && x.ratio < quirks.THIN_RATIO)) {
+      out(`  thin: ${r.page} carries ${r.present} of ${r.expected} (${Math.round(r.ratio * 100)}%)`);
+    }
+    out('  This file is about the PRODUCT, not the instance. It gates nothing. Send it to whoever maintains the loop; it is not scrubbed of customer strings.');
+    return EXIT_OK;
+  }
+  const built = quirks.buildReport(root);
+  if (a.json) { json({ quirks: built.quirks, counts: built.counts, assessment: built.assessment }); return EXIT_OK; }
+  if (!built.quirks.length) { out('no quirks recorded or derived. `snbrain quirk --note "..."` records one.'); return EXIT_OK; }
+  for (const q of built.quirks) { out(`${q.severity.padEnd(9)} ${String(q.kind).padEnd(16)} ${q.summary}`); }
+  out('');
+  out(`${built.quirks.length} finding(s). Full report: node ${SELF} quirks --report`);
+  return EXIT_OK;
+}
+
 /* ============================================================ verify-export ===
  * F13. The manifest describes the tree; this proves the tree still matches it. Any add,
  * delete or modify after generation fails — a bare file count cannot tell a regenerated
@@ -1718,11 +1779,17 @@ const FINALIZE_PRUNE = [
   'wiki-scaffold', 'dist', 'docs/design.md', 'docs/first-run.md', 'docs/rework-plan.md',
   '.brain/in', '.brain/raw', '.brain/locks', '.brain/briefs', '.brain/workers',
   '.brain/state.json', '.brain/history.ndjson', '.brain/findings.jsonl', '.brain/questions.jsonl',
-  '.brain/drive.ndjson', '.brain/bootstrap.json',
+  '.brain/drive.ndjson', '.brain/bootstrap.json', '.brain/quirks.jsonl',
 ];
 const FINALIZE_PRUNE_RE = [/^\.claude\/skills\/snbrain-[a-z-]+$/, /^\.claude\/skills\/map-process$/, /^\.claude\/skills\/bootstrap-project-brain$/, /^docs\/(handoff-prompt|findings-response|exam)-.*\.md$/, /^\.brain\/.*\.log$/, /^\.brain\/drive-console.*$/];
 /** Extension- and editor-owned paths: kept on disk, listed as ignored, never in the manifest. */
-const FINALIZE_IGNORE = ['.vscode', 'agentinstructions.md', 'agentrules', 'autocomplete', 'spikes', '.mcp.json', '.claude/settings.local.json', 'node_modules', '.git'];
+/*
+ * Kept on disk, out of the manifest and out of git. `FINDINGS.md` is the product-feedback
+ * report: it is written FOR the operator to send back, and it is not part of what the customer
+ * receives — so pruning it would destroy the feedback and shipping it would hand the customer a
+ * list of the tool's own defects.
+ */
+const FINALIZE_IGNORE = ['.vscode', 'agentinstructions.md', 'agentrules', 'autocomplete', 'spikes', '.mcp.json', '.claude/settings.local.json', 'node_modules', '.git', 'FINDINGS.md'];
 
 function cmdFinalize(a) {
   const root = path.resolve(a.root && a.root !== true ? a.root : process.cwd());
@@ -1757,6 +1824,13 @@ function cmdFinalize(a) {
   const proof = require('child_process').spawnSync(process.execPath, [renderJs, '--root', root, '--proof'], { encoding: 'utf8' });
   out(proof.stdout.trim());
   if (proof.status !== 0 && !forced) { err('finalize refused: the read-only proof could not be generated (see above). It is required handoff evidence.'); return EXIT_REJECTED; }
+
+  // 1b. The product-feedback report, written BEFORE the machine and the quirks ledger are pruned.
+  let findingsReport = null;
+  try {
+    findingsReport = quirks.writeReport(root, 'FINDINGS.md');
+    out(`wrote FINDINGS.md — ${findingsReport.quirks.length} finding(s) about the product: ${Object.entries(findingsReport.counts).map(([k, v]) => `${v} ${k}`).join(', ') || 'none'}`);
+  } catch (e) { out(`FINDINGS.md could not be written: ${e.message}`); }
 
   // 2. Hygiene on the operating tree, BEFORE anything is deleted.
   const problems = handoffProblems(root);
@@ -1811,6 +1885,8 @@ function cmdFinalize(a) {
     '.mcp.json', '**/_last_error.json', '**/_requests.json', '**/_requests.log', '**/agent/requests/', '**/agent/responses/', '**/agent/_*',
     '.vscode/sn-agent-port.json', '.claude/settings.local.json', '.claude/scheduled_tasks.lock',
     'agentinstructions.md', 'agentrules/', 'autocomplete/', 'spikes/', 'node_modules/', '.DS_Store', 'Thumbs.db',
+    '# Feedback about the mapping product, not part of this deliverable. Send it to that team.',
+    'FINDINGS.md',
     ...instanceDirs.map((d) => `/${d}/`), '',
   ].join('\n'));
 
@@ -1848,6 +1924,9 @@ function cmdFinalize(a) {
   problems.forEach((p) => out(wrap(`  FORCED PAST: ${p}`, 2)));
   if (state.terminal !== 'success') { out(`  FORCED — terminal was "${state.terminal || 'open'}", not "success" (${a.by}: ${a.reason}).`); }
   out(`  Next: open this folder in your agent session; CLAUDE.md is the entry. Re-check integrity any time with: node -e "…" or by re-running finalize --check before the CLI was pruned.`);
+  if (findingsReport) {
+    out(`  FINDINGS.md is on disk, untracked and outside the manifest: ${findingsReport.quirks.length} finding(s) about the LOOP, not the customer. Send it to whoever maintains this product — it is how the next run is better than this one.`);
+  }
   return verify.ok ? EXIT_OK : EXIT_REJECTED;
 }
 
@@ -2072,6 +2151,8 @@ const COMMANDS = {
   'verify-export': cmdVerifyExport,
   finalize: cmdFinalize,
   'skills-audit': cmdSkillsAudit,
+  quirk: cmdQuirk,
+  quirks: cmdQuirks,
   isolate: cmdIsolate,
   next: cmdNext,
   ingest: cmdIngest,

@@ -7443,6 +7443,152 @@ test('F1: the runner contract — detection names the VS Code adapter, a missing
   assert(!fs.existsSync(path.join(root, '.brain', 'briefs')), 'a brief was written for a runner that cannot run it');
 });
 
+// ===========================================================================
+// Y — FINDINGS about the product. The second population, kept out of the first.
+// ===========================================================================
+
+group('Y. product findings (quirks)');
+
+const quirksLib = require('./lib/quirks.js');
+
+/** A brain with the friction a real run leaves behind: rejections, an override, a thin page. */
+function quirkFixture(name) {
+  const root = scratchRepo(name);
+  const brain = Brain.init({ root, instance: 'acmedev', stageOrder: STAGE_ORDER });
+  brain.upsertClaims([
+    { locus: { table: 'sys_script', sysId: 'a'.repeat(32), key: 'One' }, assertion: 'active = true', band: 'A', status: 'verified' },
+    { locus: { table: 'sys_script', sysId: 'b'.repeat(32), key: 'Two' }, assertion: 'active = true', band: 'A', status: 'verified' },
+    { locus: { table: 'sys_script', sysId: 'c'.repeat(32), key: 'Three' }, assertion: 'active = true', band: 'A', status: 'verified' },
+    { locus: { table: 'sys_script', sysId: 'd'.repeat(32), key: 'Four' }, assertion: 'active = true', band: 'A', status: 'verified' },
+  ], { stage: 'harvest' });
+  brain.recordIteration('explain', { accepted: false, progress: false, rejections: ['$.claims[2].assertion: an assertion under eight words is refused as a label, because a label is not behaviour'] });
+  brain.state.overrides = [{ kind: 'cap', target: 'harvest', value: 6, by: 'a named operator', reason: 'the queue is legitimately longer than the default cap', at: '2026-09-04T10:00:00Z' }];
+  brain.save('fixture');
+  // The registry names ONE of the four artifacts: a page thinner than its own evidence.
+  putFile(root, 'docs/wiki/registry-sys-ids.md', `---\ntitle: "sys_id Registry"\nstatus: "draft"\nclaims-rendered: 1\n---\n\n| Name | sys_id |\n|---|---|\n| One | \`${'a'.repeat(32)}\` |\n`);
+  return { root, brain };
+}
+
+test('a quirk is recorded, is content-hashed, and never touches the findings ledger', () => {
+  const { root, brain } = quirkFixture('quirk-record');
+  const q = quirksLib.recordQuirk(root, { note: 'the anchor procedure told me to exclude a set the developer had named', stage: 'anchor', severity: 'blocker', by: 'a.developer' });
+  assertEqual(q.id, quirksLib.recordQuirk(root, { note: 'the anchor procedure told me to exclude a set the developer had named', stage: 'anchor' }).id,
+    'the same quirk logged twice minted two ids — a re-run would report it as two defects');
+  assertEqual(quirksLib.recordedQuirks(root).length, 1, 'the ledger did not deduplicate by content');
+  assertEqual(brain.findings().size, 0, 'a product quirk entered the INSTANCE findings ledger, where a blocking row gates terminal success');
+  assertEqual(brain.successBlockers().filter((b) => /quirk/i.test(b)).length, 0, 'a quirk blocked terminal success; it must gate nothing');
+  assert(fs.existsSync(path.join(root, '.brain', 'quirks.jsonl')), 'the quirks ledger is not where the report looks for it');
+});
+
+test('a quirk with no real note is refused, because an empty report is worse than none', () => {
+  const { root } = quirkFixture('quirk-empty');
+  let threw = false;
+  try { quirksLib.recordQuirk(root, { note: 'broken' }); } catch (e) { threw = true; assertIncludes(e.message, 'at least 10 characters'); }
+  assertEqual(threw, true, 'a one-word quirk was accepted');
+});
+
+test('the run\'s own friction is derived without anyone logging it', () => {
+  const { root } = quirkFixture('quirk-derive');
+  const derived = quirksLib.deriveExecutionQuirks(root);
+  const rej = derived.find((q) => q.kind === 'stage-rejection');
+  assert(rej, 'a rejected iteration produced no quirk — every rejection is the CLI telling a worker it got the loop wrong');
+  assertEqual(rej.stage, 'explain');
+  assertEqual(rej.severity, 'friction', 'one satisfied rejection was called a blocker; that buries the findings that end runs');
+  assertIncludes(rej.detail, 'under eight words', 'the rejection text did not survive into the report, so nobody can act on it');
+  const ov = derived.find((q) => q.kind === 'override');
+  assert(ov, 'a raised bound produced no quirk — a bound a real run must raise is calibrated on the wrong thing');
+  assertIncludes(ov.detail, 'the queue is legitimately longer');
+});
+
+test('a schema rejection keeps its message instead of collapsing to a JSON path', () => {
+  assertIncludes(quirksLib.rejectionGist('$.answers[3].alternatives[0].rejectedBecause: required, but missing from the artifact entirely'),
+    'required', 'the gist cut at the first dot and reported a bare JSON path');
+  assertIncludes(quirksLib.rejectionGist('$.answers[3].alternatives[0].rejectedBecause: required, but missing'), '$.answers[3]', 'the path prefix was dropped');
+});
+
+test('completeness is measured per page against the evidence that page owns', () => {
+  const { root } = quirkFixture('quirk-complete');
+  const a = quirksLib.assessCompleteness(root);
+  const reg = a.rows.find((r) => /registry-sys-ids/.test(r.page));
+  assert(reg, 'the registry was not measured at all');
+  assertEqual(reg.expected, 4, 'the population is the distinct artifact identities in the ledger');
+  assertEqual(reg.present, 1, 'the page carries one');
+  const { quirks: qs } = quirksLib.completenessQuirks(root);
+  const thin = qs.find((q) => q.kind === 'page-thin');
+  assert(thin, 'a page carrying a quarter of its evidence raised nothing');
+  assertIncludes(thin.summary, '1 of the 4');
+  assertIncludes(thin.detail, 'Population:', 'the finding does not name the population it counted, so nobody can argue with it');
+});
+
+test('a page that carries everything it owns raises nothing', () => {
+  const { root } = quirkFixture('quirk-full');
+  const ids = ['a', 'b', 'c', 'd'].map((c) => c.repeat(32));
+  putFile(root, 'docs/wiki/registry-sys-ids.md', `---\ntitle: "sys_id Registry"\nstatus: "draft"\nclaims-rendered: 4\n---\n\n${ids.map((i) => `| \`${i}\` |`).join('\n')}\n`);
+  const { quirks: qs } = quirksLib.completenessQuirks(root);
+  assertEqual(qs.filter((q) => q.kind === 'page-thin' && /registry/.test(q.summary)).length, 0, 'a complete registry was still reported thin');
+});
+
+test('the report carries both populations, says it gates nothing, and warns it is unscrubbed', () => {
+  const { root } = quirkFixture('quirk-report');
+  quirksLib.recordQuirk(root, { note: 'the driver needed a CLI this laptop is not allowed to install', severity: 'blocker' });
+  const built = quirksLib.writeReport(root, 'FINDINGS.md');
+  const body = fs.readFileSync(path.join(root, 'FINDINGS.md'), 'utf8');
+  assertIncludes(body, 'not allowed to install', 'the recorded quirk is missing from the report');
+  assertIncludes(body, 'registry-sys-ids.md', 'the completeness half is missing');
+  assertIncludes(body, 'Nothing here gates anything', 'the report does not say it gates nothing, which is what stops it being read as a blocker list');
+  assertIncludes(body, 'Not scrubbed', 'the report does not warn that it carries the customer\'s own strings');
+  assertIncludes(body, 'Completeness measures, including the ones that passed', 'passing measures are hidden, so a wrong threshold cannot be argued with');
+  assert(/generated probe suite/.test(body), 'the report does not say what it cannot measure');
+  assert(built.quirks.length >= 2 && built.counts.blocker >= 1, 'the summary counts are wrong');
+});
+
+test('the report is honest when a run was clean', () => {
+  const root = scratchRepo('quirk-clean');
+  Brain.init({ root, instance: 'acmedev', stageOrder: STAGE_ORDER });
+  const built = quirksLib.buildReport(root);
+  assertEqual(built.quirks.length, 0);
+  assertIncludes(built.body, 'That is a real result', 'a clean run reads as a broken report rather than a clean one');
+});
+
+test('FINDINGS.md is written by finalize, kept on disk, and kept OUT of the deliverable', () => {
+  const { root } = exportFixture('quirk-finalize');
+  brainWithLog(root);
+  quirksLib.recordQuirk(root, { note: 'the interview gate offered me shadow questions and the ingest then refused them', severity: 'blocker', stage: 'interview' });
+  putFile(root, 'tools/snbrain/snbrain.js', '// machine\n');
+  gitCommitAll(root, 'operating state');
+  const r = cli(['finalize', '--by', 'a named operator', '--root', root, '--force', '--reason', 'testing the feedback path']);
+  assertEqual(r.code, 0, `finalize failed:\n${r.stdout}${r.stderr}`);
+  const findings = path.join(root, 'FINDINGS.md');
+  assert(fs.existsSync(findings), 'finalize did not leave FINDINGS.md on disk — the feedback is destroyed by the prune it triggers');
+  assertIncludes(fs.readFileSync(findings, 'utf8'), 'shadow questions', 'the recorded quirk did not reach the report finalize wrote');
+  assert(!fs.existsSync(path.join(root, '.brain', 'quirks.jsonl')), 'the raw quirks ledger shipped in the deliverable');
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'EXPORT-MANIFEST.json'), 'utf8'));
+  assert(!manifest.files.some((f) => f.path === 'FINDINGS.md'), 'product feedback entered the customer\'s manifest');
+  assertEqual(cli(['finalize', '--check', '--root', root]).code, 0, 'FINDINGS.md on disk makes the integrity check fail');
+  const tracked = require('child_process').spawnSync('git', ['-C', root, 'ls-files'], { encoding: 'utf8' }).stdout;
+  assertEqual(/FINDINGS\.md/.test(tracked), false, 'product feedback was committed into the customer\'s repository');
+  assertIncludes(r.stdout, 'FINDINGS.md', 'finalize did not tell the operator the report exists');
+});
+
+test('an export never carries the product feedback either', () => {
+  const { root } = exportFixture('quirk-export');
+  quirksLib.recordQuirk(root, { note: 'a quirk that must not reach the customer deliverable' });
+  quirksLib.writeReport(root, 'FINDINGS.md');
+  const to = path.join(SCRATCH, 'out-quirk-export');
+  assertEqual(cli(['export', '--to', to, '--root', root]).code, 0);
+  assert(!fs.existsSync(path.join(to, 'FINDINGS.md')), 'FINDINGS.md shipped to the customer');
+  assert(!fs.existsSync(path.join(to, '.brain', 'quirks.jsonl')), 'the quirks ledger shipped to the customer');
+});
+
+test('every brief tells a worker how to report the loop itself', () => {
+  assert(stages.HARD_RULES.some((r) => /snbrain\.js quirk/.test(r)),
+    'the hard rules never mention the quirk verb, so a worker hitting a contradiction has nowhere to put it');
+  const { root } = startRun('quirk-brief');
+  const brief = cli(['next', '--root', root]);
+  assertEqual(brief.code, 0, `next failed:\n${brief.stdout}${brief.stderr}`);
+  assertEqual(/quirk --note/.test(brief.stdout), true, `the composed brief does not carry the quirk instruction:\n${brief.stdout.slice(0, 400)}`);
+});
+
 const failed = results.filter((r) => !r.ok);
 process.stdout.write(`\n${results.length - failed.length}/${results.length} passed`);
 process.stdout.write(failed.length ? `, ${failed.length} FAILED\n` : '\n');

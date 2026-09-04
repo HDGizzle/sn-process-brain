@@ -47,7 +47,9 @@ credits** with that split, ≈ 8,500–11,000 all-Opus. Change `models` in
 > the instance. Stop and show me the state on exit code 3. When the loop reaches `done`
 > and terminal success, run `node tools/snbrain/snbrain.js finalize --by <my name>` — it
 > prunes the mapping machine out of this folder, writes the hashed manifest and restarts
-> git history at the deliverable — then tell me what to review.
+> git history at the deliverable — then tell me what to review. Whenever the loop itself
+> gets in the way at any point, record it with
+> `node tools/snbrain/snbrain.js quirk --note "<what happened>"` — it gates nothing.
 
 That is the whole thing. The agent asks three questions and does the rest.
 
@@ -58,6 +60,27 @@ That is the whole thing. The agent asks three questions and does the rest.
 → harvest (deep reads of that surface) → explain → verify → questions → interview (you)
 → render → finalize`. Cost per spawn lands in `.brain/drive.ndjson` where the runner
 reports it; for Copilot read the usage dashboard.
+
+## Telling us what went wrong — `FINDINGS.md`
+
+The loop records findings about your INSTANCE in the wiki. It records findings about
+**itself** somewhere else, and that file is how this product gets better:
+
+```bash
+node tools/snbrain/snbrain.js quirk --note "the driver wanted a CLI I am not allowed to install" --severity blocker
+node tools/snbrain/snbrain.js quirks --report      # writes FINDINGS.md
+```
+
+`quirk` costs one line and gates nothing — use it the moment something bites. The report
+adds what the run already knows without being told: which stages were rejected and why,
+which bounds had to be raised, where reported spend and the request log disagreed, and
+**whether each wiki page carries what its own evidence supports** (if the ledger holds 212
+artifact identities and the registry lists 35, the report says so, with both numbers).
+
+`finalize` writes it automatically and leaves it on disk, untracked and outside the export
+manifest: it is feedback for the product team, not part of what the customer receives. It
+is **not scrubbed** — it quotes your set names and instance — so send it to the product
+team, not anywhere public.
 
 ## What you get
 
